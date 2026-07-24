@@ -10,6 +10,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.question import Question
+    from app.models.domain_score import DomainScore
 
 
 class Domain(Base):
@@ -35,5 +36,9 @@ class Domain(Base):
     )
 
     questions: Mapped[list["Question"]] = relationship(
+        back_populates="domain",
+    )
+
+    domain_scores: Mapped[list["DomainScore"]] = relationship(
         back_populates="domain",
     )

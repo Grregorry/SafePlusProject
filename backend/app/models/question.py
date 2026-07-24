@@ -19,6 +19,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.domain import Domain
+    from app.models.assessment_question import AssessmentQuestion
 
 
 class Question(Base):
@@ -79,4 +80,8 @@ class Question(Base):
 
     domain: Mapped["Domain"] = relationship(
         back_populates="questions",
+    )
+
+    assessment_questions: Mapped[list["AssessmentQuestion"]] = relationship(
+        back_populates="question",
     )
