@@ -18,6 +18,9 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.organisation import Organisation
+    from app.models.ai_analysis import AIAnalysis
+    from app.models.assessment_question import AssessmentQuestion
+    from app.models.domain_score import DomainScore
 
 
 class Assessment(Base):
@@ -89,4 +92,23 @@ class Assessment(Base):
 
     organisation: Mapped["Organisation"] = relationship(
         back_populates="assessments",
+    )
+
+    assessment_questions: Mapped[list["AssessmentQuestion"]] = relationship(
+        back_populates="assessment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    domain_scores: Mapped[list["DomainScore"]] = relationship(
+        back_populates="assessment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    ai_analysis: Mapped["AIAnalysis | None"] = relationship(
+        back_populates="assessment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
     )
