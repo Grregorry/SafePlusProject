@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.db.session import engine
+from app.api.routes.questions import router as questions_router
 
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,8 @@ app = FastAPI(
     description="Backend API for the SafePlus assessment platform.",
     version="0.1.0",
 )
+
+app.include_router(questions_router)
 
 app.add_middleware(
     CORSMiddleware,
