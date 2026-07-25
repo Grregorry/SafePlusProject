@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
+from app.services.scoring import calculate_assessment_scores
 
 from app.api.dependencies import (
     CurrentOrganisation,
@@ -16,6 +17,7 @@ from app.models import (
 from app.schemas.assessment import (
     AssessmentQuestionSetupResponse,
     AssessmentResponse,
+    AssessmentScoringResponse,
     QuestionResponsesResponse,
     QuestionResponsesUpdate,
     ResponseCountResponse,
@@ -450,4 +452,28 @@ def get_question_responses(
             ResponseCountResponse.model_validate(row)
             for row in response_rows
         ],
+    )
+
+@router.post(
+    "/{assessment_id}/calculate-scores",
+    response_model=AssessmentScoringResponse,
+)
+def calculate_scores(
+    assessment_id: int,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> AssessmentScoringResponse:
+    assessment = get_owned_assessment(
+        assessment_id,
+        organisation.id,
+        database,
+    )
+
+    scoring_result = calculate_assessment_scores(
+        assessment,
+        database,
+    )
+
+    return AssessmentScoringResponse.model_validate(
+        scoring_result
     )

@@ -71,3 +71,28 @@ class QuestionResponsesResponse(BaseModel):
     question_id: int
     respondent_group: str
     responses: list[ResponseCountResponse]
+
+class QuestionScoreResponse(BaseModel):
+    question_id: int
+    question_number: str
+    employee_mean: Decimal
+    manager_mean: Decimal
+    combined_mean: Decimal
+    opinion_gap: Decimal
+    maturity_level: str
+    intervention_tier: str
+
+
+class DomainScoreResponse(BaseModel):
+    domain_id: int
+    combined_mean: Decimal
+    maturity_level: str
+
+
+class AssessmentScoringResponse(BaseModel):
+    assessment_id: int
+    questions_scored: int
+    question_scores: list[QuestionScoreResponse]
+    domain_scores: list[DomainScoreResponse]
+    overall_combined_mean: Decimal | None
+    overall_maturity_label: str | None
