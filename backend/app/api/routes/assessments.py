@@ -11,10 +11,14 @@ from app.models import (
     AssessmentQuestion,
     Domain,
     Question,
+    ResponseCount,
 )
 from app.schemas.assessment import (
     AssessmentQuestionSetupResponse,
     AssessmentResponse,
+    QuestionResponsesResponse,
+    QuestionResponsesUpdate,
+    ResponseCountResponse,
     SituationQuestionSelectionRequest,
 )
 
@@ -262,4 +266,188 @@ def update_situation_question_selection(
         assessment_id,
         organisation,
         database,
+    )
+
+def get_active_assessment_question(
+    assessment_id: int,
+    question_id: int,
+    organisation_id: int,
+    database: DatabaseSession,
+) -> AssessmentQuestion:
+    get_owned_assessment(
+        assessment_id,
+        organisation_id,
+        database,
+    )
+
+    assessment_question = database.scalar(
+        select(AssessmentQuestion)
+        .options(
+            selectinload(AssessmentQuestion.question)
+        )
+        .where(
+            AssessmentQuestion.assessment_id == assessment_id,
+            AssessmentQuestion.question_id == question_id,
+            AssessmentQuestion.is_active.is_(True),
+        )
+    )
+
+    if assessment_question is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "This question is not active for the assessment."
+            ),
+        )
+
+    return assessment_question
+
+
+@router.put(
+    "/{assessment_id}/questions/{question_id}/responses",
+    response_model=QuestionResponsesResponse,
+)
+def update_question_responses(
+    assessment_id: int,
+    question_id: int,
+    response_update: QuestionResponsesUpdate,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> QuestionResponsesResponse:
+    assessment = get_owned_assessment(
+        assessment_id,
+        organisation.id,
+        database,
+    )
+
+    assessment_question = get_active_assessment_question(
+        assessment_id,
+        question_id,
+        organisation.id,
+        database,
+    )
+
+    received_options = [
+        response.response_option
+        for response in response_update.responses
+    ]
+
+    if len(received_options) != len(set(received_options)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Each response option may only appear once.",
+        )
+
+    na_count = next(
+        (
+            response.count
+            for response in response_update.responses
+            if response.response_option == "N/A"
+        ),
+        0,
+    )
+
+    if na_count > 0:
+        question = assessment_question.question
+
+        if (
+            response_update.respondent_group != "Employee"
+            or not question.is_situation_dependent
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "N/A is only allowed for Employee responses "
+                    "to situation-dependent questions."
+                ),
+            )
+
+    database.execute(
+        delete(ResponseCount).where(
+            ResponseCount.assessment_question_id
+            == assessment_question.id,
+            ResponseCount.respondent_group
+            == response_update.respondent_group,
+        )
+    )
+
+    response_rows = [
+        ResponseCount(
+            assessment_question_id=assessment_question.id,
+            respondent_group=response_update.respondent_group,
+            response_option=response.response_option,
+            count=response.count,
+        )
+        for response in response_update.responses
+        if response.count > 0
+    ]
+
+    database.add_all(response_rows)
+
+    if response_rows and assessment.status == "draft":
+        assessment.status = "in_progress"
+
+    database.commit()
+
+    return QuestionResponsesResponse(
+        assessment_id=assessment.id,
+        question_id=question_id,
+        respondent_group=response_update.respondent_group,
+        responses=[
+            ResponseCountResponse(
+                response_option=row.response_option,
+                count=row.count,
+            )
+            for row in response_rows
+        ],
+    )
+
+@router.get(
+    "/{assessment_id}/questions/{question_id}/responses/{respondent_group}",
+    response_model=QuestionResponsesResponse,
+)
+def get_question_responses(
+    assessment_id: int,
+    question_id: int,
+    respondent_group: str,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> QuestionResponsesResponse:
+    if respondent_group not in {
+        "Employee",
+        "Senior Manager",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid respondent group.",
+        )
+
+    assessment_question = get_active_assessment_question(
+        assessment_id,
+        question_id,
+        organisation.id,
+        database,
+    )
+
+    response_rows = list(
+        database.scalars(
+            select(ResponseCount)
+            .where(
+                ResponseCount.assessment_question_id
+                == assessment_question.id,
+                ResponseCount.respondent_group
+                == respondent_group,
+            )
+            .order_by(ResponseCount.id)
+        ).all()
+    )
+
+    return QuestionResponsesResponse(
+        assessment_id=assessment_id,
+        question_id=question_id,
+        respondent_group=respondent_group,
+        responses=[
+            ResponseCountResponse.model_validate(row)
+            for row in response_rows
+        ],
     )
