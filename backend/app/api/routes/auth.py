@@ -1,16 +1,24 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.api.dependencies import CurrentOrganisation
+from app.core.config import settings
+from app.core.security import (
+    create_access_token,
+    hash_password,
+    verify_password,
+)
 from app.db.session import get_db
 from app.models import Organisation
 from app.schemas.auth import (
     OrganisationRegisterRequest,
     OrganisationResponse,
+    TokenResponse,
 )
 
 
@@ -39,8 +47,7 @@ def register_organisation(
 
     existing_organisation = database.scalar(
         select(Organisation).where(
-            func.lower(Organisation.email)
-            == normalised_email
+            func.lower(Organisation.email) == normalised_email
         )
     )
 
@@ -53,9 +60,7 @@ def register_organisation(
     organisation = Organisation(
         name=normalised_name,
         email=normalised_email,
-        password_hash=hash_password(
-            registration.password
-        ),
+        password_hash=hash_password(registration.password),
         is_verified=False,
     )
 
@@ -73,4 +78,54 @@ def register_organisation(
             detail="Unable to create this account.",
         ) from error
 
+    return organisation
+
+
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+)
+def login_organisation(
+    form_data: Annotated[
+        OAuth2PasswordRequestForm,
+        Depends(),
+    ],
+    database: DatabaseSession,
+) -> TokenResponse:
+    normalised_email = form_data.username.lower()
+
+    organisation = database.scalar(
+        select(Organisation).where(
+            func.lower(Organisation.email) == normalised_email
+        )
+    )
+
+    if organisation is None or not verify_password(
+        form_data.password,
+        organisation.password_hash,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token = create_access_token(
+        organisation_id=organisation.id,
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.access_token_expire_minutes * 60,
+    )
+
+
+@router.get(
+    "/me",
+    response_model=OrganisationResponse,
+)
+def get_current_account(
+    organisation: CurrentOrganisation,
+) -> Organisation:
     return organisation
