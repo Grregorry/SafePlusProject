@@ -4,6 +4,7 @@ import {
   Routes,
 } from "react-router-dom";
 
+import AssessmentSetupPage from "./features/assessment/AssessmentSetupPage";
 import QuestionsPage from "./features/assessment/QuestionsPage";
 import AccountPage from "./features/auth/AccountPage";
 import LoginPage from "./features/auth/LoginPage";
@@ -21,6 +22,11 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/account" element={<AccountPage />} />
       <Route path="/questions" element={<QuestionsPage />} />
+
+      <Route
+        path="/assessments/:assessmentId"
+        element={<AssessmentSetupPage />}
+      />
 
       <Route
         path="*"
