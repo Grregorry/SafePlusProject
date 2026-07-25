@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.db.session import engine
+from app.api.routes.assessments import router as assessments_router
 from app.api.routes.questions import router as questions_router
 from app.api.routes.auth import router as auth_router
 
@@ -18,6 +19,7 @@ app = FastAPI(
 )
 app.include_router(auth_router)
 app.include_router(questions_router)
+app.include_router(assessments_router)
 
 app.add_middleware(
     CORSMiddleware,
