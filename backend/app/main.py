@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.db.session import engine
 from app.api.routes.questions import router as questions_router
+from app.api.routes.auth import router as auth_router
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ app = FastAPI(
     description="Backend API for the SafePlus assessment platform.",
     version="0.1.0",
 )
-
+app.include_router(auth_router)
 app.include_router(questions_router)
 
 app.add_middleware(
