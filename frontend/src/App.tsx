@@ -9,6 +9,7 @@ import QuestionsPage from "./features/assessment/QuestionsPage";
 import AccountPage from "./features/auth/AccountPage";
 import LoginPage from "./features/auth/LoginPage";
 import RegisterPage from "./features/auth/RegisterPage";
+import AssessmentResponsePage from "./features/assessment/AssessmentResponsePage";
 
 function App() {
   return (
@@ -22,10 +23,15 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/account" element={<AccountPage />} />
       <Route path="/questions" element={<QuestionsPage />} />
+      <Route path="/assessments/:assessmentId/responses" element={<AssessmentResponsePage />} />
+      <Route
+      path="/assessments/:assessmentId"
+      element={<AssessmentSetupPage />}
+      />
 
       <Route
-        path="/assessments/:assessmentId"
-        element={<AssessmentSetupPage />}
+      path="/assessments/:assessmentId/responses"
+      element={<AssessmentResponsePage />}
       />
 
       <Route

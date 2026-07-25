@@ -19,6 +19,28 @@ export type AssessmentSetupQuestion = {
   is_active: boolean;
 };
 
+export type RespondentGroup = "Employee" | "Senior Manager";
+
+export type ResponseOption =
+  | "Strongly Agree"
+  | "Agree"
+  | "Neither Agree nor Disagree"
+  | "Disagree"
+  | "Strongly Disagree"
+  | "N/A";
+
+export type ResponseCount = {
+  response_option: ResponseOption;
+  count: number;
+};
+
+export type QuestionResponses = {
+  assessment_id: number;
+  question_id: number;
+  respondent_group: RespondentGroup;
+  responses: ResponseCount[];
+};
+
 type ApiErrorResponse = {
   detail?: string;
 };
@@ -137,4 +159,57 @@ export async function updateQuestionSelection(
   }
 
   return response.json() as Promise<AssessmentSetupQuestion[]>;
+}
+
+export async function getQuestionResponses(
+  assessmentId: number,
+  questionId: number,
+  respondentGroup: RespondentGroup,
+  accessToken: string,
+): Promise<QuestionResponses> {
+  const encodedGroup = encodeURIComponent(respondentGroup);
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/questions/${questionId}/responses/${encodedGroup}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return response.json() as Promise<QuestionResponses>;
+}
+
+export async function updateQuestionResponses(
+  assessmentId: number,
+  questionId: number,
+  respondentGroup: RespondentGroup,
+  responses: ResponseCount[],
+  accessToken: string,
+): Promise<QuestionResponses> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/questions/${questionId}/responses`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        respondent_group: respondentGroup,
+        responses,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return response.json() as Promise<QuestionResponses>;
 }
