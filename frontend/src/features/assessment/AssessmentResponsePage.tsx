@@ -307,25 +307,37 @@ function AssessmentResponsePage() {
 
           <div className="mt-6 flex flex-wrap gap-4">
             <button
-              type="button"
-              onClick={() =>
-                navigate(
-                  `/assessments/${numericAssessmentId}`,
-                )
-              }
-              className="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-            >
-              Question setup
-            </button>
+            type="button"
+            onClick={() =>
+            navigate(
+            `/assessments/${numericAssessmentId}`,
+            )
+        }
+        className="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+        >
+         Question setup
+        </button>
 
             <button
-              type="button"
-              onClick={() => navigate("/account")}
-              className="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-            >
-              Return to account
-            </button>
-          </div>
+            type="button"
+            onClick={() =>
+            navigate(
+            `/assessments/${numericAssessmentId}/results`,
+            )
+        }
+        className="rounded-lg bg-slate-900 px-4 py-2 font-semibold text-white"
+        >
+        View results
+        </button>
+
+        <button
+        type="button"
+        onClick={() => navigate("/account")}
+        className="rounded-lg border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+        >
+         Return to account
+        </button>
+    </div>
 
           {errorMessage && (
             <div className="mt-6 rounded-lg bg-red-50 p-4 text-red-700">

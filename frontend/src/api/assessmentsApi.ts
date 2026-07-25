@@ -41,6 +41,31 @@ export type QuestionResponses = {
   responses: ResponseCount[];
 };
 
+export type QuestionScoreResult = {
+  question_id: number;
+  question_number: string;
+  employee_mean: string;
+  manager_mean: string;
+  combined_mean: string;
+  opinion_gap: string;
+  maturity_level: string;
+  intervention_tier: string;
+};
+
+export type DomainScoreResult = {
+  domain_id: number;
+  combined_mean: string;
+  maturity_level: string;
+};
+
+export type AssessmentScoringResult = {
+  assessment_id: number;
+  questions_scored: number;
+  question_scores: QuestionScoreResult[];
+  domain_scores: DomainScoreResult[];
+  overall_combined_mean: string | null;
+  overall_maturity_label: string | null;
+};
 type ApiErrorResponse = {
   detail?: string;
 };
@@ -212,4 +237,25 @@ export async function updateQuestionResponses(
   }
 
   return response.json() as Promise<QuestionResponses>;
+}
+
+export async function calculateAssessmentScores(
+  assessmentId: number,
+  accessToken: string,
+): Promise<AssessmentScoringResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/calculate-scores`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return response.json() as Promise<AssessmentScoringResult>;
 }
