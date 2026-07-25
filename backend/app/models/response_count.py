@@ -26,11 +26,12 @@ class ResponseCount(Base):
             name="ck_response_count_respondent_group",
         ),
         CheckConstraint(
-            (
-                "response_option IN "
-                "('Strongly Agree', 'Agree', 'Neither', "
-                "'Disagree', 'Strongly Disagree', 'N/A')"
-            ),
+        (
+        "response_option IN "
+        "('Strongly Agree', 'Agree', "
+        "'Neither Agree nor Disagree', "
+        "'Disagree', 'Strongly Disagree', 'N/A')"
+        ),
             name="ck_response_count_option",
         ),
         CheckConstraint(
@@ -55,7 +56,7 @@ class ResponseCount(Base):
     )
 
     response_option: Mapped[str] = mapped_column(
-        String(30),
+        String(40),
         nullable=False,
     )
 

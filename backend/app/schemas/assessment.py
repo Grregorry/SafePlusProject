@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,3 +32,42 @@ class AssessmentResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+class ResponseCountInput(BaseModel):
+    response_option: Literal[
+        "Strongly Agree",
+        "Agree",
+        "Neither Agree nor Disagree",
+        "Disagree",
+        "Strongly Disagree",
+        "N/A",
+    ]
+
+    count: int = Field(
+        ge=0,
+    )
+
+
+class QuestionResponsesUpdate(BaseModel):
+    respondent_group: Literal[
+        "Employee",
+        "Senior Manager",
+    ]
+
+    responses: list[ResponseCountInput]
+
+
+class ResponseCountResponse(BaseModel):
+    response_option: str
+    count: int
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class QuestionResponsesResponse(BaseModel):
+    assessment_id: int
+    question_id: int
+    respondent_group: str
+    responses: list[ResponseCountResponse]
