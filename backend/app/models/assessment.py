@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -17,10 +18,23 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.organisation import Organisation
     from app.models.ai_analysis import AIAnalysis
     from app.models.assessment_question import AssessmentQuestion
     from app.models.domain_score import DomainScore
+    from app.models.organisation import Organisation
+    from app.models.survey_submission import SurveySubmission
+
+
+PUBLIC_CODE_CHARACTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_public_code() -> str:
+    random_part = "".join(
+        secrets.choice(PUBLIC_CODE_CHARACTERS)
+        for _ in range(8)
+    )
+
+    return f"SP-{random_part}"
 
 
 class Assessment(Base):
@@ -52,7 +66,9 @@ class Assessment(Base):
         ),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+    )
 
     organisation_id: Mapped[int] = mapped_column(
         ForeignKey(
@@ -60,6 +76,13 @@ class Assessment(Base):
             ondelete="CASCADE",
         ),
         nullable=False,
+    )
+
+    public_code: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        unique=True,
+        default=generate_public_code,
     )
 
     status: Mapped[str] = mapped_column(
@@ -94,7 +117,9 @@ class Assessment(Base):
         back_populates="assessments",
     )
 
-    assessment_questions: Mapped[list["AssessmentQuestion"]] = relationship(
+    assessment_questions: Mapped[
+        list["AssessmentQuestion"]
+    ] = relationship(
         back_populates="assessment",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -111,4 +136,12 @@ class Assessment(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         uselist=False,
+    )
+
+    survey_submissions: Mapped[
+        list["SurveySubmission"]
+    ] = relationship(
+        back_populates="assessment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
