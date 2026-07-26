@@ -16,6 +16,11 @@ import {
   type SurveyAccess,
 } from "../../api/assessmentsApi";
 
+import {
+  getSubmissionSummary,
+  type SubmissionSummary,
+} from "../../api/submissionSummaryApi";
+
 function AssessmentSetupPage() {
   const navigate = useNavigate();
   const { assessmentId } = useParams();
@@ -35,11 +40,23 @@ function AssessmentSetupPage() {
   const [surveyAccess, setSurveyAccess] =
     useState<SurveyAccess | null>(null);
 
+  const [
+    submissionSummary,
+    setSubmissionSummary,
+  ] = useState<SubmissionSummary | null>(
+    null,
+  );
+
   const [isLoading, setIsLoading] =
     useState(true);
 
   const [isSaving, setIsSaving] =
     useState(false);
+
+  const [
+    isRefreshingSummary,
+    setIsRefreshingSummary,
+  ] = useState(false);
 
   const [
     errorMessage,
@@ -84,6 +101,7 @@ function AssessmentSetupPage() {
         const [
           loadedQuestions,
           loadedSurveyAccess,
+          loadedSubmissionSummary,
         ] = await Promise.all([
           getAssessmentQuestions(
             numericAssessmentId,
@@ -93,11 +111,18 @@ function AssessmentSetupPage() {
             numericAssessmentId,
             accessToken,
           ),
+          getSubmissionSummary(
+            numericAssessmentId,
+            accessToken,
+          ),
         ]);
 
         setQuestions(loadedQuestions);
         setSurveyAccess(
           loadedSurveyAccess,
+        );
+        setSubmissionSummary(
+          loadedSubmissionSummary,
         );
 
         setSelectedQuestionIds(
@@ -235,6 +260,47 @@ function AssessmentSetupPage() {
     }
   }
 
+  async function handleRefreshSummary() {
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
+
+    if (!accessToken) {
+      navigate("/login", {
+        replace: true,
+      });
+      return;
+    }
+
+    try {
+      setIsRefreshingSummary(true);
+      setErrorMessage("");
+
+      const updatedSummary =
+        await getSubmissionSummary(
+          numericAssessmentId,
+          accessToken,
+        );
+
+      setSubmissionSummary(
+        updatedSummary,
+      );
+
+      setSuccessMessage(
+        "Respondent summary refreshed.",
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to refresh respondent summary.",
+      );
+    } finally {
+      setIsRefreshingSummary(false);
+    }
+  }
+
   async function handleCopySurveyLink() {
     if (!publicSurveyUrl) {
       setErrorMessage(
@@ -346,18 +412,18 @@ function AssessmentSetupPage() {
             </div>
 
             {surveyAccess && (
-            <span
-               className={`rounded-full px-3 py-1 text-sm font-semibold ${
-                isSurveyClosed
-                ? "bg-slate-200 text-slate-700"
-                : "bg-emerald-100 text-emerald-700"
-            }`}
-            >
-            {isSurveyClosed
-            ? "Survey closed"
-            : "Survey open"}
-          </span>
-        )}
+              <span
+                className={`rounded-full px-3 py-1 text-sm font-semibold ${
+                  isSurveyClosed
+                    ? "bg-slate-200 text-slate-700"
+                    : "bg-emerald-100 text-emerald-700"
+                }`}
+              >
+                {isSurveyClosed
+                  ? "Survey closed"
+                  : "Survey open"}
+              </span>
+            )}
           </div>
 
           {surveyAccess && (
@@ -406,6 +472,114 @@ function AssessmentSetupPage() {
                 </button>
               </div>
             </div>
+          )}
+        </section>
+
+        <section className="mt-8 rounded-xl bg-white p-8 shadow">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
+                Participation
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold text-slate-900">
+                Respondent summary
+              </h2>
+
+              <p className="mt-2 text-slate-600">
+                Track how many surveys have been
+                started and submitted.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={
+                handleRefreshSummary
+              }
+              disabled={
+                isRefreshingSummary
+              }
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+            >
+              {isRefreshingSummary
+                ? "Refreshing..."
+                : "Refresh summary"}
+            </button>
+          </div>
+
+          {submissionSummary ? (
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <article className="rounded-xl border border-slate-200 p-5">
+                <p className="text-sm font-semibold text-slate-500">
+                  Employee submitted
+                </p>
+
+                <p className="mt-2 text-3xl font-bold text-slate-900">
+                  {
+                    submissionSummary.employee_submitted
+                  }
+                </p>
+              </article>
+
+              <article className="rounded-xl border border-slate-200 p-5">
+                <p className="text-sm font-semibold text-slate-500">
+                  Senior Manager submitted
+                </p>
+
+                <p className="mt-2 text-3xl font-bold text-slate-900">
+                  {
+                    submissionSummary.senior_manager_submitted
+                  }
+                </p>
+              </article>
+
+              <article className="rounded-xl border border-slate-200 p-5">
+                <p className="text-sm font-semibold text-slate-500">
+                  In progress
+                </p>
+
+                <p className="mt-2 text-3xl font-bold text-amber-700">
+                  {
+                    submissionSummary.in_progress_total
+                  }
+                </p>
+
+                <p className="mt-2 text-xs text-slate-500">
+                  Employees:{" "}
+                  {
+                    submissionSummary.employee_in_progress
+                  }{" "}
+                  · Managers:{" "}
+                  {
+                    submissionSummary.senior_manager_in_progress
+                  }
+                </p>
+              </article>
+
+              <article className="rounded-xl border border-slate-200 p-5">
+                <p className="text-sm font-semibold text-slate-500">
+                  Total submitted
+                </p>
+
+                <p className="mt-2 text-3xl font-bold text-emerald-700">
+                  {
+                    submissionSummary.submitted_total
+                  }
+                </p>
+
+                <p className="mt-2 text-xs text-slate-500">
+                  {
+                    submissionSummary.started_total
+                  }{" "}
+                  total survey sessions started
+                </p>
+              </article>
+            </div>
+          ) : (
+            <p className="mt-6 text-slate-600">
+              Submission summary is unavailable.
+            </p>
           )}
         </section>
 

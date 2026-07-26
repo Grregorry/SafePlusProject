@@ -19,6 +19,10 @@ from app.api.routes.questions import (
 )
 from app.db.session import engine
 
+from app.api.routes.submission_summary import (
+    router as submission_summary_router,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,7 @@ app.include_router(questions_router)
 app.include_router(assessments_router)
 app.include_router(assessment_progress_router)
 app.include_router(public_surveys_router)
+app.include_router(submission_summary_router)
 
 app.add_middleware(
     CORSMiddleware,
