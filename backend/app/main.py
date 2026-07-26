@@ -11,6 +11,9 @@ from app.api.routes.assessments import (
     router as assessments_router,
 )
 from app.api.routes.auth import router as auth_router
+from app.api.routes.public_surveys import (
+    router as public_surveys_router,
+)
 from app.api.routes.questions import (
     router as questions_router,
 )
@@ -31,6 +34,7 @@ app.include_router(auth_router)
 app.include_router(questions_router)
 app.include_router(assessments_router)
 app.include_router(assessment_progress_router)
+app.include_router(public_surveys_router)
 
 app.add_middleware(
     CORSMiddleware,
