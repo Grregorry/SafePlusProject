@@ -16,6 +16,8 @@ import {
   type SurveyAccess,
 } from "../../api/assessmentsApi";
 
+import SubmissionManagementPanel from "./SubmissionManagementPanel";
+
 import {
   getSubmissionSummary,
   type SubmissionSummary,
@@ -493,13 +495,14 @@ function AssessmentSetupPage() {
             </div>
 
             <button
-              type="button"
-              onClick={
-                handleRefreshSummary
-              }
-              disabled={
-                isRefreshingSummary
-              }
+            data-refresh-summary
+            type="button"
+            onClick={
+            handleRefreshSummary
+            }
+            disabled={
+            isRefreshingSummary
+          }
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
             >
               {isRefreshingSummary
@@ -583,6 +586,17 @@ function AssessmentSetupPage() {
           )}
         </section>
 
+          <SubmissionManagementPanel
+          assessmentId={numericAssessmentId}
+          onChanged={() => {
+          const refreshButton =
+          document.querySelector<HTMLButtonElement>(
+          "[data-refresh-summary]",
+        );
+
+        refreshButton?.click();
+      }}
+      />
         <section className="mt-8 rounded-xl bg-white p-8 shadow">
           {situationQuestions.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center">
