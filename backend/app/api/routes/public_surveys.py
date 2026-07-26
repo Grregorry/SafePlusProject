@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 
 from app.api.dependencies import (
     CurrentOrganisation,
@@ -14,6 +14,7 @@ from app.models import (
     IndividualResponse,
     Organisation,
     Question,
+    ResponseCount,
     SurveySubmission,
 )
 from app.schemas.public_survey import (
@@ -101,6 +102,77 @@ def get_active_question_rows(
             )
         ).all()
     )
+
+
+def rebuild_response_counts(
+    assessment_id: int,
+    respondent_group: str,
+    database: DatabaseSession,
+) -> None:
+    """
+    Rebuild aggregate response counts using all submitted
+    respondent surveys for one assessment and respondent group.
+    """
+
+    active_question_ids = list(
+        database.scalars(
+            select(AssessmentQuestion.id).where(
+                AssessmentQuestion.assessment_id == assessment_id,
+                AssessmentQuestion.is_active.is_(True),
+            )
+        ).all()
+    )
+
+    if not active_question_ids:
+        return
+
+    database.execute(
+        delete(ResponseCount).where(
+            ResponseCount.assessment_question_id.in_(
+                active_question_ids
+            ),
+            ResponseCount.respondent_group == respondent_group,
+        )
+    )
+
+    aggregated_rows = database.execute(
+        select(
+            IndividualResponse.assessment_question_id,
+            IndividualResponse.response_option,
+            func.count(IndividualResponse.id),
+        )
+        .join(
+            SurveySubmission,
+            IndividualResponse.submission_id
+            == SurveySubmission.id,
+        )
+        .where(
+            SurveySubmission.assessment_id == assessment_id,
+            SurveySubmission.respondent_group == respondent_group,
+            SurveySubmission.status == "submitted",
+            IndividualResponse.assessment_question_id.in_(
+                active_question_ids
+            ),
+        )
+        .group_by(
+            IndividualResponse.assessment_question_id,
+            IndividualResponse.response_option,
+        )
+    ).all()
+
+    for (
+        assessment_question_id,
+        response_option,
+        response_total,
+    ) in aggregated_rows:
+        database.add(
+            ResponseCount(
+                assessment_question_id=assessment_question_id,
+                respondent_group=respondent_group,
+                response_option=response_option,
+                count=int(response_total),
+            )
+        )
 
 
 @router.get(
@@ -388,7 +460,6 @@ def save_public_answer(
         )
 
         database.add(existing_response)
-
     else:
         existing_response.response_option = request.response_option
 
@@ -416,6 +487,7 @@ def save_public_answer(
         total_question_count=total_question_count,
     )
 
+
 @router.delete(
     "/api/public/submissions/{submission_token}/answers/{question_id}",
     response_model=SaveSurveyAnswerResponse,
@@ -440,8 +512,7 @@ def delete_public_answer(
         select(AssessmentQuestion).where(
             AssessmentQuestion.assessment_id
             == submission.assessment_id,
-            AssessmentQuestion.question_id
-            == question_id,
+            AssessmentQuestion.question_id == question_id,
             AssessmentQuestion.is_active.is_(True),
         )
     )
@@ -486,6 +557,7 @@ def delete_public_answer(
         total_question_count=total_question_count,
     )
 
+
 @router.post(
     "/api/public/submissions/{submission_token}/submit",
     response_model=SubmitSurveyResponse,
@@ -504,12 +576,26 @@ def submit_public_survey(
         database,
     )
 
-    total_question_count = len(question_rows)
+    active_question_ids = [
+        assessment_question.id
+        for assessment_question, _, _ in question_rows
+    ]
+
+    total_question_count = len(active_question_ids)
+
+    if total_question_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This survey has no active questions.",
+        )
 
     answered_question_count = len(
         database.scalars(
             select(IndividualResponse.id).where(
                 IndividualResponse.submission_id == submission.id,
+                IndividualResponse.assessment_question_id.in_(
+                    active_question_ids
+                ),
             )
         ).all()
     )
@@ -518,7 +604,7 @@ def submit_public_survey(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"All questions must be answered before submission. "
+                "All questions must be answered before submission. "
                 f"{answered_question_count} of "
                 f"{total_question_count} questions are answered."
             ),
@@ -530,8 +616,16 @@ def submit_public_survey(
             timezone.utc
         )
 
-        database.commit()
-        database.refresh(submission)
+        database.flush()
+
+    rebuild_response_counts(
+        assessment_id=submission.assessment_id,
+        respondent_group=submission.respondent_group,
+        database=database,
+    )
+
+    database.commit()
+    database.refresh(submission)
 
     if submission.submitted_at is None:
         raise HTTPException(
