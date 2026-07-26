@@ -1,7 +1,9 @@
 import logging
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import (
+    CORSMiddleware,
+)
 from sqlalchemy import text
 
 from app.api.routes.assessment_progress import (
@@ -10,18 +12,22 @@ from app.api.routes.assessment_progress import (
 from app.api.routes.assessments import (
     router as assessments_router,
 )
-from app.api.routes.auth import router as auth_router
+from app.api.routes.auth import (
+    router as auth_router,
+)
 from app.api.routes.public_surveys import (
     router as public_surveys_router,
 )
 from app.api.routes.questions import (
     router as questions_router,
 )
-from app.db.session import engine
-
+from app.api.routes.submission_management import (
+    router as submission_management_router,
+)
 from app.api.routes.submission_summary import (
     router as submission_summary_router,
 )
+from app.db.session import engine
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +35,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="SafePlus API",
     description=(
-        "Backend API for the SafePlus assessment platform."
+        "Backend API for the SafePlus "
+        "assessment platform."
     ),
     version="0.1.0",
 )
@@ -37,9 +44,16 @@ app = FastAPI(
 app.include_router(auth_router)
 app.include_router(questions_router)
 app.include_router(assessments_router)
-app.include_router(assessment_progress_router)
+app.include_router(
+    assessment_progress_router
+)
 app.include_router(public_surveys_router)
-app.include_router(submission_summary_router)
+app.include_router(
+    submission_summary_router
+)
+app.include_router(
+    submission_management_router
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,7 +70,9 @@ app.add_middleware(
 @app.get("/")
 def root() -> dict[str, str]:
     return {
-        "message": "SafePlus API is running",
+        "message": (
+            "SafePlus API is running"
+        ),
     }
 
 
@@ -87,5 +103,7 @@ def database_health_check() -> dict[str, str]:
 
         raise HTTPException(
             status_code=503,
-            detail="Database connection failed",
+            detail=(
+                "Database connection failed"
+            ),
         ) from error
