@@ -66,22 +66,76 @@ export type AssessmentScoringResult = {
   overall_combined_mean: string | null;
   overall_maturity_label: string | null;
 };
+
+export type AssessmentCompletionResult = {
+  assessment_id: number;
+  status: string;
+  completed_at: string;
+  overall_combined_mean: string;
+  overall_maturity_label: string;
+  questions_scored: number;
+};
+
 type ApiErrorResponse = {
-  detail?: string;
+  detail?:
+    | string
+    | {
+        message?: string;
+        incomplete_questions?: Array<{
+          question_id: number;
+          question_number: string;
+          missing_groups: string[];
+        }>;
+      };
 };
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-async function getErrorMessage(response: Response): Promise<string> {
+async function getErrorMessage(
+  response: Response,
+): Promise<string> {
   try {
     const error = (await response.json()) as ApiErrorResponse;
 
     if (typeof error.detail === "string") {
       return error.detail;
     }
+
+    if (
+      error.detail &&
+      typeof error.detail === "object"
+    ) {
+      const message =
+        error.detail.message ??
+        "The request could not be completed.";
+
+      const incompleteQuestions =
+        error.detail.incomplete_questions ?? [];
+
+      if (incompleteQuestions.length === 0) {
+        return message;
+      }
+
+      const details = incompleteQuestions
+        .slice(0, 10)
+        .map(
+          (question) =>
+            `${question.question_number}: missing ${question.missing_groups.join(
+              " and ",
+            )}`,
+        )
+        .join("; ");
+
+      const remaining =
+        incompleteQuestions.length - 10;
+
+      return remaining > 0
+        ? `${message} ${details}; and ${remaining} more.`
+        : `${message} ${details}.`;
+    }
   } catch {
-    // The response did not contain valid JSON.
+    // Response did not contain valid JSON.
   }
 
   return `Request failed with status ${response.status}.`;
@@ -258,4 +312,25 @@ export async function calculateAssessmentScores(
   }
 
   return response.json() as Promise<AssessmentScoringResult>;
+}
+
+export async function completeAssessment(
+  assessmentId: number,
+  accessToken: string,
+): Promise<AssessmentCompletionResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/complete`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return response.json() as Promise<AssessmentCompletionResult>;
 }

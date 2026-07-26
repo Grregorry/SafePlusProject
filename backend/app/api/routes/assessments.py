@@ -1,7 +1,8 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
-from app.services.scoring import calculate_assessment_scores
 
 from app.api.dependencies import (
     CurrentOrganisation,
@@ -14,15 +15,19 @@ from app.models import (
     Question,
     ResponseCount,
 )
+from app.models.question_score import QuestionScore
 from app.schemas.assessment import (
+    AssessmentCompletionResponse,
     AssessmentQuestionSetupResponse,
     AssessmentResponse,
     AssessmentScoringResponse,
+    IncompleteQuestionResponse,
     QuestionResponsesResponse,
     QuestionResponsesUpdate,
     ResponseCountResponse,
     SituationQuestionSelectionRequest,
 )
+from app.services.scoring import calculate_assessment_scores
 
 
 router = APIRouter(
@@ -52,6 +57,16 @@ def get_owned_assessment(
     return assessment
 
 
+def ensure_assessment_is_editable(
+    assessment: Assessment,
+) -> None:
+    if assessment.status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Completed assessments cannot be edited.",
+        )
+
+
 def initialise_compulsory_questions(
     assessment: Assessment,
     database: DatabaseSession,
@@ -59,7 +74,8 @@ def initialise_compulsory_questions(
     existing_question_ids = set(
         database.scalars(
             select(AssessmentQuestion.question_id).where(
-                AssessmentQuestion.assessment_id == assessment.id
+                AssessmentQuestion.assessment_id
+                == assessment.id
             )
         ).all()
     )
@@ -82,6 +98,46 @@ def initialise_compulsory_questions(
 
     if new_rows:
         database.add_all(new_rows)
+
+
+def get_active_assessment_question(
+    assessment_id: int,
+    question_id: int,
+    organisation_id: int,
+    database: DatabaseSession,
+) -> AssessmentQuestion:
+    get_owned_assessment(
+        assessment_id,
+        organisation_id,
+        database,
+    )
+
+    assessment_question = database.scalar(
+        select(AssessmentQuestion)
+        .options(
+            selectinload(
+                AssessmentQuestion.question
+            )
+        )
+        .where(
+            AssessmentQuestion.assessment_id
+            == assessment_id,
+            AssessmentQuestion.question_id
+            == question_id,
+            AssessmentQuestion.is_active.is_(True),
+        )
+    )
+
+    if assessment_question is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "This question is not active for the "
+                "assessment."
+            ),
+        )
+
+    return assessment_question
 
 
 @router.post(
@@ -123,12 +179,17 @@ def get_assessments(
     statement = (
         select(Assessment)
         .where(
-            Assessment.organisation_id == organisation.id
+            Assessment.organisation_id
+            == organisation.id
         )
-        .order_by(Assessment.created_at.desc())
+        .order_by(
+            Assessment.created_at.desc()
+        )
     )
 
-    return list(database.scalars(statement).all())
+    return list(
+        database.scalars(statement).all()
+    )
 
 
 @router.get(
@@ -149,7 +210,9 @@ def get_assessment(
 
 @router.get(
     "/{assessment_id}/questions",
-    response_model=list[AssessmentQuestionSetupResponse],
+    response_model=list[
+        AssessmentQuestionSetupResponse
+    ],
 )
 def get_assessment_questions(
     assessment_id: int,
@@ -171,17 +234,27 @@ def get_assessment_questions(
 
     active_question_ids = set(
         database.scalars(
-            select(AssessmentQuestion.question_id).where(
-                AssessmentQuestion.assessment_id == assessment.id,
-                AssessmentQuestion.is_active.is_(True),
+            select(
+                AssessmentQuestion.question_id
+            ).where(
+                AssessmentQuestion.assessment_id
+                == assessment.id,
+                AssessmentQuestion.is_active.is_(
+                    True
+                ),
             )
         ).all()
     )
 
     rows = database.execute(
         select(Question, Domain)
-        .join(Domain, Question.domain_id == Domain.id)
-        .options(selectinload(Question.domain))
+        .join(
+            Domain,
+            Question.domain_id == Domain.id,
+        )
+        .options(
+            selectinload(Question.domain)
+        )
         .order_by(
             Domain.display_order,
             Question.id,
@@ -191,13 +264,22 @@ def get_assessment_questions(
     return [
         AssessmentQuestionSetupResponse(
             question_id=question.id,
-            question_number=question.question_number,
+            question_number=(
+                question.question_number
+            ),
             domain_name=domain.name,
             employee_text=question.employee_text,
             manager_text=question.manager_text,
-            is_compulsory=question.is_compulsory,
-            is_situation_dependent=question.is_situation_dependent,
-            is_active=question.id in active_question_ids,
+            is_compulsory=(
+                question.is_compulsory
+            ),
+            is_situation_dependent=(
+                question.is_situation_dependent
+            ),
+            is_active=(
+                question.id
+                in active_question_ids
+            ),
         )
         for question, domain in rows
     ]
@@ -205,7 +287,9 @@ def get_assessment_questions(
 
 @router.put(
     "/{assessment_id}/question-selection",
-    response_model=list[AssessmentQuestionSetupResponse],
+    response_model=list[
+        AssessmentQuestionSetupResponse
+    ],
 )
 def update_situation_question_selection(
     assessment_id: int,
@@ -219,6 +303,10 @@ def update_situation_question_selection(
         database,
     )
 
+    ensure_assessment_is_editable(
+        assessment
+    )
+
     initialise_compulsory_questions(
         assessment,
         database,
@@ -227,24 +315,36 @@ def update_situation_question_selection(
     valid_situation_ids = set(
         database.scalars(
             select(Question.id).where(
-                Question.is_situation_dependent.is_(True)
+                Question.is_situation_dependent.is_(
+                    True
+                )
             )
         ).all()
     )
 
-    requested_ids = set(selection.question_ids)
+    requested_ids = set(
+        selection.question_ids
+    )
 
-    invalid_ids = requested_ids - valid_situation_ids
+    invalid_ids = (
+        requested_ids - valid_situation_ids
+    )
 
     if invalid_ids:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="One or more selected questions are invalid.",
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "One or more selected questions "
+                "are invalid."
+            ),
         )
 
     database.execute(
         delete(AssessmentQuestion).where(
-            AssessmentQuestion.assessment_id == assessment.id,
+            AssessmentQuestion.assessment_id
+            == assessment.id,
             AssessmentQuestion.question_id.in_(
                 valid_situation_ids
             ),
@@ -270,43 +370,12 @@ def update_situation_question_selection(
         database,
     )
 
-def get_active_assessment_question(
-    assessment_id: int,
-    question_id: int,
-    organisation_id: int,
-    database: DatabaseSession,
-) -> AssessmentQuestion:
-    get_owned_assessment(
-        assessment_id,
-        organisation_id,
-        database,
-    )
-
-    assessment_question = database.scalar(
-        select(AssessmentQuestion)
-        .options(
-            selectinload(AssessmentQuestion.question)
-        )
-        .where(
-            AssessmentQuestion.assessment_id == assessment_id,
-            AssessmentQuestion.question_id == question_id,
-            AssessmentQuestion.is_active.is_(True),
-        )
-    )
-
-    if assessment_question is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                "This question is not active for the assessment."
-            ),
-        )
-
-    return assessment_question
-
 
 @router.put(
-    "/{assessment_id}/questions/{question_id}/responses",
+    (
+        "/{assessment_id}/questions/"
+        "{question_id}/responses"
+    ),
     response_model=QuestionResponsesResponse,
 )
 def update_question_responses(
@@ -322,45 +391,69 @@ def update_question_responses(
         database,
     )
 
-    assessment_question = get_active_assessment_question(
-        assessment_id,
-        question_id,
-        organisation.id,
-        database,
+    ensure_assessment_is_editable(
+        assessment
+    )
+
+    assessment_question = (
+        get_active_assessment_question(
+            assessment_id,
+            question_id,
+            organisation.id,
+            database,
+        )
     )
 
     received_options = [
         response.response_option
-        for response in response_update.responses
+        for response
+        in response_update.responses
     ]
 
-    if len(received_options) != len(set(received_options)):
+    if len(received_options) != len(
+        set(received_options)
+    ):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Each response option may only appear once.",
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "Each response option may only "
+                "appear once."
+            ),
         )
 
     na_count = next(
         (
             response.count
-            for response in response_update.responses
-            if response.response_option == "N/A"
+            for response
+            in response_update.responses
+            if response.response_option
+            == "N/A"
         ),
         0,
     )
 
     if na_count > 0:
-        question = assessment_question.question
+        question = (
+            assessment_question.question
+        )
 
         if (
-            response_update.respondent_group != "Employee"
-            or not question.is_situation_dependent
+            response_update.respondent_group
+            != "Employee"
+            or not (
+                question.is_situation_dependent
+            )
         ):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=(
+                    status.HTTP_400_BAD_REQUEST
+                ),
                 detail=(
-                    "N/A is only allowed for Employee responses "
-                    "to situation-dependent questions."
+                    "N/A is only allowed for "
+                    "Employee responses to "
+                    "situation-dependent questions."
                 ),
             )
 
@@ -375,18 +468,28 @@ def update_question_responses(
 
     response_rows = [
         ResponseCount(
-            assessment_question_id=assessment_question.id,
-            respondent_group=response_update.respondent_group,
-            response_option=response.response_option,
+            assessment_question_id=(
+                assessment_question.id
+            ),
+            respondent_group=(
+                response_update.respondent_group
+            ),
+            response_option=(
+                response.response_option
+            ),
             count=response.count,
         )
-        for response in response_update.responses
+        for response
+        in response_update.responses
         if response.count > 0
     ]
 
     database.add_all(response_rows)
 
-    if response_rows and assessment.status == "draft":
+    if (
+        response_rows
+        and assessment.status == "draft"
+    ):
         assessment.status = "in_progress"
 
     database.commit()
@@ -394,18 +497,27 @@ def update_question_responses(
     return QuestionResponsesResponse(
         assessment_id=assessment.id,
         question_id=question_id,
-        respondent_group=response_update.respondent_group,
+        respondent_group=(
+            response_update.respondent_group
+        ),
         responses=[
             ResponseCountResponse(
-                response_option=row.response_option,
+                response_option=(
+                    row.response_option
+                ),
                 count=row.count,
             )
             for row in response_rows
         ],
     )
 
+
 @router.get(
-    "/{assessment_id}/questions/{question_id}/responses/{respondent_group}",
+    (
+        "/{assessment_id}/questions/"
+        "{question_id}/responses/"
+        "{respondent_group}"
+    ),
     response_model=QuestionResponsesResponse,
 )
 def get_question_responses(
@@ -420,15 +532,19 @@ def get_question_responses(
         "Senior Manager",
     }:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
             detail="Invalid respondent group.",
         )
 
-    assessment_question = get_active_assessment_question(
-        assessment_id,
-        question_id,
-        organisation.id,
-        database,
+    assessment_question = (
+        get_active_assessment_question(
+            assessment_id,
+            question_id,
+            organisation.id,
+            database,
+        )
     )
 
     response_rows = list(
@@ -449,10 +565,13 @@ def get_question_responses(
         question_id=question_id,
         respondent_group=respondent_group,
         responses=[
-            ResponseCountResponse.model_validate(row)
+            ResponseCountResponse.model_validate(
+                row
+            )
             for row in response_rows
         ],
     )
+
 
 @router.post(
     "/{assessment_id}/calculate-scores",
@@ -469,11 +588,247 @@ def calculate_scores(
         database,
     )
 
-    scoring_result = calculate_assessment_scores(
-        assessment,
+    scoring_result = (
+        calculate_assessment_scores(
+            assessment,
+            database,
+        )
+    )
+
+    return (
+        AssessmentScoringResponse.model_validate(
+            scoring_result
+        )
+    )
+
+
+@router.post(
+    "/{assessment_id}/complete",
+    response_model=AssessmentCompletionResponse,
+)
+def complete_assessment(
+    assessment_id: int,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> AssessmentCompletionResponse:
+    assessment = get_owned_assessment(
+        assessment_id,
+        organisation.id,
         database,
     )
 
-    return AssessmentScoringResponse.model_validate(
-        scoring_result
+    if assessment.status == "completed":
+        if (
+            assessment.completed_at is None
+            or (
+                assessment.overall_combined_mean
+                is None
+            )
+            or (
+                assessment.overall_maturity_label
+                is None
+            )
+        ):
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_409_CONFLICT
+                ),
+                detail=(
+                    "This assessment is marked as "
+                    "completed but its final results "
+                    "are incomplete."
+                ),
+            )
+
+        question_score_count = (
+            database.scalar(
+                select(
+                    func.count(
+                        QuestionScore.id
+                    )
+                )
+                .join(
+                    AssessmentQuestion,
+                    (
+                        QuestionScore
+                        .assessment_question_id
+                        == AssessmentQuestion.id
+                    ),
+                )
+                .where(
+                    AssessmentQuestion.assessment_id
+                    == assessment.id
+                )
+            )
+        )
+
+        return AssessmentCompletionResponse(
+            assessment_id=assessment.id,
+            status=assessment.status,
+            completed_at=(
+                assessment.completed_at
+            ),
+            overall_combined_mean=(
+                assessment
+                .overall_combined_mean
+            ),
+            overall_maturity_label=(
+                assessment
+                .overall_maturity_label
+            ),
+            questions_scored=(
+                question_score_count or 0
+            ),
+        )
+
+    active_questions = list(
+        database.execute(
+            select(
+                AssessmentQuestion,
+                Question,
+            )
+            .join(
+                Question,
+                (
+                    AssessmentQuestion.question_id
+                    == Question.id
+                ),
+            )
+            .where(
+                AssessmentQuestion.assessment_id
+                == assessment.id,
+                AssessmentQuestion.is_active.is_(
+                    True
+                ),
+            )
+            .order_by(Question.id)
+        ).all()
+    )
+
+    if not active_questions:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "This assessment has no active "
+                "questions."
+            ),
+        )
+
+    incomplete_questions: list[
+        IncompleteQuestionResponse
+    ] = []
+
+    for (
+        assessment_question,
+        question,
+    ) in active_questions:
+        response_groups = set(
+            database.scalars(
+                select(
+                    ResponseCount.respondent_group
+                ).where(
+                    ResponseCount
+                    .assessment_question_id
+                    == assessment_question.id,
+                    ResponseCount.count > 0,
+                    ResponseCount.response_option
+                    != "N/A",
+                )
+            ).all()
+        )
+
+        missing_groups = [
+            respondent_group
+            for respondent_group in (
+                "Employee",
+                "Senior Manager",
+            )
+            if respondent_group
+            not in response_groups
+        ]
+
+        if missing_groups:
+            incomplete_questions.append(
+                IncompleteQuestionResponse(
+                    question_id=question.id,
+                    question_number=(
+                        question.question_number
+                    ),
+                    missing_groups=(
+                        missing_groups
+                    ),
+                )
+            )
+
+    if incomplete_questions:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail={
+                "message": (
+                    "All active questions require "
+                    "Employee and Senior Manager "
+                    "responses."
+                ),
+                "incomplete_questions": [
+                    item.model_dump()
+                    for item
+                    in incomplete_questions
+                ],
+            },
+        )
+
+    scoring_result = (
+        calculate_assessment_scores(
+            assessment,
+            database,
+        )
+    )
+
+    if (
+        assessment.overall_combined_mean
+        is None
+        or (
+            assessment.overall_maturity_label
+            is None
+        )
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                "An overall result could not be "
+                "calculated. Each of the three "
+                "domains must contain at least one "
+                "scored question."
+            ),
+        )
+
+    assessment.status = "completed"
+    assessment.completed_at = datetime.now(
+        timezone.utc
+    )
+
+    database.commit()
+    database.refresh(assessment)
+
+    return AssessmentCompletionResponse(
+        assessment_id=assessment.id,
+        status=assessment.status,
+        completed_at=assessment.completed_at,
+        overall_combined_mean=(
+            assessment.overall_combined_mean
+        ),
+        overall_maturity_label=(
+            assessment.overall_maturity_label
+        ),
+        questions_scored=int(
+            scoring_result[
+                "questions_scored"
+            ]
+        ),
     )

@@ -96,3 +96,17 @@ class AssessmentScoringResponse(BaseModel):
     domain_scores: list[DomainScoreResponse]
     overall_combined_mean: Decimal | None
     overall_maturity_label: str | None
+
+class IncompleteQuestionResponse(BaseModel):
+    question_id: int
+    question_number: str
+    missing_groups: list[str]
+
+
+class AssessmentCompletionResponse(BaseModel):
+    assessment_id: int
+    status: str
+    completed_at: datetime
+    overall_combined_mean: Decimal
+    overall_maturity_label: str
+    questions_scored: int
