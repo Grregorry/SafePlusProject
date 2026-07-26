@@ -19,7 +19,16 @@ export type AssessmentSetupQuestion = {
   is_active: boolean;
 };
 
-export type RespondentGroup = "Employee" | "Senior Manager";
+export type SurveyAccess = {
+  assessment_id: number;
+  public_code: string;
+  public_path: string;
+  status: string;
+};
+
+export type RespondentGroup =
+  | "Employee"
+  | "Senior Manager";
 
 export type ResponseOption =
   | "Strongly Agree"
@@ -90,13 +99,15 @@ type ApiErrorResponse = {
 };
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_BASE_URL ??
+  "http://127.0.0.1:8000";
 
 async function getErrorMessage(
   response: Response,
 ): Promise<string> {
   try {
-    const error = (await response.json()) as ApiErrorResponse;
+    const error =
+      (await response.json()) as ApiErrorResponse;
 
     if (typeof error.detail === "string") {
       return error.detail;
@@ -144,14 +155,19 @@ async function getErrorMessage(
 export async function getAssessments(
   accessToken: string,
 ): Promise<Assessment[]> {
-  const response = await fetch(`${API_BASE_URL}/api/assessments`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
     },
-  });
+  );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<Assessment[]>;
@@ -160,15 +176,20 @@ export async function getAssessments(
 export async function createAssessment(
   accessToken: string,
 ): Promise<Assessment> {
-  const response = await fetch(`${API_BASE_URL}/api/assessments`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
     },
-  });
+  );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<Assessment>;
@@ -188,7 +209,9 @@ export async function getAssessment(
   );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<Assessment>;
@@ -208,10 +231,36 @@ export async function getAssessmentQuestions(
   );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
-  return response.json() as Promise<AssessmentSetupQuestion[]>;
+  return response.json() as Promise<
+    AssessmentSetupQuestion[]
+  >;
+}
+
+export async function getSurveyAccess(
+  assessmentId: number,
+  accessToken: string,
+): Promise<SurveyAccess> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/survey-access`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  return response.json() as Promise<SurveyAccess>;
 }
 
 export async function updateQuestionSelection(
@@ -234,10 +283,14 @@ export async function updateQuestionSelection(
   );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
-  return response.json() as Promise<AssessmentSetupQuestion[]>;
+  return response.json() as Promise<
+    AssessmentSetupQuestion[]
+  >;
 }
 
 export async function getQuestionResponses(
@@ -246,7 +299,8 @@ export async function getQuestionResponses(
   respondentGroup: RespondentGroup,
   accessToken: string,
 ): Promise<QuestionResponses> {
-  const encodedGroup = encodeURIComponent(respondentGroup);
+  const encodedGroup =
+    encodeURIComponent(respondentGroup);
 
   const response = await fetch(
     `${API_BASE_URL}/api/assessments/${assessmentId}/questions/${questionId}/responses/${encodedGroup}`,
@@ -258,7 +312,9 @@ export async function getQuestionResponses(
   );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<QuestionResponses>;
@@ -287,7 +343,9 @@ export async function updateQuestionResponses(
   );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<QuestionResponses>;
@@ -308,7 +366,9 @@ export async function calculateAssessmentScores(
   );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<AssessmentScoringResult>;
@@ -329,7 +389,9 @@ export async function completeAssessment(
   );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<AssessmentCompletionResult>;
