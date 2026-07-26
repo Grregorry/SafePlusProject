@@ -1,14 +1,30 @@
-import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  useEffect,
+  useState,
+} from "react";
+import {
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
+import {
+  generateAIAnalysis,
+  getAIAnalysis,
+  type AIAnalysis,
+  type SafePlusGuidanceSource,
+} from "../../api/aiAnalysisApi";
 import {
   calculateAssessmentScores,
   completeAssessment,
+  getAssessment,
+  type Assessment,
   type AssessmentCompletionResult,
   type AssessmentScoringResult,
 } from "../../api/assessmentsApi";
 
-function getDomainName(domainId: number): string {
+function getDomainName(
+  domainId: number,
+): string {
   if (domainId === 1) {
     return "Leadership";
   }
@@ -56,8 +72,32 @@ function getInterventionClasses(
   return "bg-slate-100 text-slate-700";
 }
 
+function getUrgencyClasses(
+  urgency: string,
+): string {
+  const normalisedUrgency =
+    urgency.toLowerCase();
+
+  if (
+    normalisedUrgency.includes("high") ||
+    normalisedUrgency.includes("urgent") ||
+    normalisedUrgency.includes("immediate")
+  ) {
+    return "bg-red-100 text-red-800";
+  }
+
+  if (
+    normalisedUrgency.includes("medium") ||
+    normalisedUrgency.includes("moderate")
+  ) {
+    return "bg-orange-100 text-orange-800";
+  }
+
+  return "bg-emerald-100 text-emerald-800";
+}
+
 function formatScore(
-  value: string | null,
+  value: string | number | null,
 ): string {
   if (value === null) {
     return "Not available";
@@ -66,10 +106,72 @@ function formatScore(
   const numericValue = Number(value);
 
   if (Number.isNaN(numericValue)) {
-    return value;
+    return String(value);
   }
 
   return numericValue.toFixed(2);
+}
+
+function getSourceById(
+  sourceId: string,
+  sources: SafePlusGuidanceSource[],
+): SafePlusGuidanceSource | undefined {
+  return sources.find(
+    (source) =>
+      source.source_id === sourceId,
+  );
+}
+
+function SourceLinks({
+  sourceIds,
+  sources,
+}: {
+  sourceIds: string[];
+  sources: SafePlusGuidanceSource[];
+}) {
+  if (sourceIds.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        WorkSafe sources
+      </p>
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        {sourceIds.map((sourceId) => {
+          const source = getSourceById(
+            sourceId,
+            sources,
+          );
+
+          if (!source) {
+            return (
+              <span
+                key={sourceId}
+                className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600"
+              >
+                {sourceId}
+              </span>
+            );
+          }
+
+          return (
+            <a
+              key={sourceId}
+              href={source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800 hover:bg-cyan-100"
+            >
+              {source.title}
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function AssessmentResultsPage() {
@@ -78,6 +180,13 @@ function AssessmentResultsPage() {
 
   const numericAssessmentId =
     Number(assessmentId);
+
+  const [
+    assessment,
+    setAssessment,
+  ] = useState<Assessment | null>(
+    null,
+  );
 
   const [results, setResults] =
     useState<AssessmentScoringResult | null>(
@@ -92,19 +201,151 @@ function AssessmentResultsPage() {
       null,
     );
 
-  const [isCalculating, setIsCalculating] =
-    useState(false);
+  const [
+    aiAnalysis,
+    setAIAnalysis,
+  ] = useState<AIAnalysis | null>(
+    null,
+  );
 
-  const [isCompleting, setIsCompleting] =
-    useState(false);
+  const [
+    isLoadingPage,
+    setIsLoadingPage,
+  ] = useState(true);
 
-  const [errorMessage, setErrorMessage] =
-    useState("");
+  const [
+    isCalculating,
+    setIsCalculating,
+  ] = useState(false);
+
+  const [
+    isCompleting,
+    setIsCompleting,
+  ] = useState(false);
+
+  const [
+    isGeneratingAnalysis,
+    setIsGeneratingAnalysis,
+  ] = useState(false);
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState("");
+
+  const [
+    analysisMessage,
+    setAnalysisMessage,
+  ] = useState("");
+
+  const isAssessmentCompleted =
+    assessment?.status === "completed" ||
+    completionResult?.status ===
+      "completed";
+
+  const domainData =
+    aiAnalysis?.domain_summaries;
+
+  const keyStrengths =
+    domainData?.key_strengths ?? [];
+
+  const keyRisks =
+    domainData?.key_risks ?? [];
+
+  const aiDomainSummaries =
+    domainData?.domains ?? [];
+
+  const guidanceSources =
+    domainData?.guidance_sources ?? [];
+
+  const limitations =
+    domainData?.limitations ?? [];
+
+  const priorityActions =
+    aiAnalysis?.priority_actions ?? [];
+
+  const roadmap =
+    aiAnalysis?.roadmap ?? [];
+
+  useEffect(() => {
+    async function loadPage() {
+      const accessToken =
+        localStorage.getItem(
+          "safeplus_access_token",
+        );
+
+      if (!accessToken) {
+        navigate("/login", {
+          replace: true,
+        });
+
+        return;
+      }
+
+      if (
+        !Number.isInteger(
+          numericAssessmentId,
+        ) ||
+        numericAssessmentId <= 0
+      ) {
+        setErrorMessage(
+          "Invalid assessment ID.",
+        );
+
+        setIsLoadingPage(false);
+        return;
+      }
+
+      try {
+        setErrorMessage("");
+
+        const [
+          assessmentResult,
+          scoringResult,
+          savedAnalysis,
+        ] = await Promise.all([
+          getAssessment(
+            numericAssessmentId,
+            accessToken,
+          ),
+          calculateAssessmentScores(
+            numericAssessmentId,
+            accessToken,
+          ),
+          getAIAnalysis(
+            numericAssessmentId,
+            accessToken,
+          ),
+        ]);
+
+        setAssessment(
+          assessmentResult,
+        );
+
+        setResults(scoringResult);
+        setAIAnalysis(savedAnalysis);
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load assessment results.",
+        );
+      } finally {
+        setIsLoadingPage(false);
+      }
+    }
+
+    void loadPage();
+  }, [
+    navigate,
+    numericAssessmentId,
+  ]);
 
   async function handleCalculateScores() {
-    const accessToken = localStorage.getItem(
-      "safeplus_access_token",
-    );
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
 
     if (!accessToken) {
       navigate("/login", {
@@ -114,22 +355,10 @@ function AssessmentResultsPage() {
       return;
     }
 
-    if (
-      !Number.isInteger(
-        numericAssessmentId,
-      ) ||
-      numericAssessmentId <= 0
-    ) {
-      setErrorMessage(
-        "Invalid assessment ID.",
-      );
-
-      return;
-    }
-
     try {
       setIsCalculating(true);
       setErrorMessage("");
+      setAnalysisMessage("");
 
       const scoringResult =
         await calculateAssessmentScores(
@@ -138,6 +367,16 @@ function AssessmentResultsPage() {
         );
 
       setResults(scoringResult);
+
+      const updatedAssessment =
+        await getAssessment(
+          numericAssessmentId,
+          accessToken,
+        );
+
+      setAssessment(
+        updatedAssessment,
+      );
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -163,19 +402,6 @@ function AssessmentResultsPage() {
       return;
     }
 
-    if (
-      !Number.isInteger(
-        numericAssessmentId,
-      ) ||
-      numericAssessmentId <= 0
-    ) {
-      setErrorMessage(
-        "Invalid assessment ID.",
-      );
-
-      return;
-    }
-
     const confirmed = window.confirm(
       "Complete this assessment? Responses and question selection cannot be edited afterward.",
     );
@@ -187,6 +413,7 @@ function AssessmentResultsPage() {
     try {
       setIsCompleting(true);
       setErrorMessage("");
+      setAnalysisMessage("");
 
       const completedAssessment =
         await completeAssessment(
@@ -205,6 +432,16 @@ function AssessmentResultsPage() {
         );
 
       setResults(scoringResult);
+
+      const updatedAssessment =
+        await getAssessment(
+          numericAssessmentId,
+          accessToken,
+        );
+
+      setAssessment(
+        updatedAssessment,
+      );
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -216,24 +453,118 @@ function AssessmentResultsPage() {
     }
   }
 
+  async function handleGenerateAIAnalysis() {
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
+
+    if (!accessToken) {
+      navigate("/login", {
+        replace: true,
+      });
+
+      return;
+    }
+
+    if (!isAssessmentCompleted) {
+      setErrorMessage(
+        "Complete the assessment before generating AI analysis.",
+      );
+
+      return;
+    }
+
+    const confirmed = window.confirm(
+      aiAnalysis
+        ? "Regenerate the AI analysis? The existing saved analysis will be replaced."
+        : "Generate an AI analysis using the assessment results and curated WorkSafe SafePlus guidance?",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsGeneratingAnalysis(true);
+      setErrorMessage("");
+      setAnalysisMessage("");
+
+      const generatedAnalysis =
+        await generateAIAnalysis(
+          numericAssessmentId,
+          accessToken,
+        );
+
+      setAIAnalysis(
+        generatedAnalysis,
+      );
+
+      setAnalysisMessage(
+        generatedAnalysis.message,
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to generate AI analysis.",
+      );
+    } finally {
+      setIsGeneratingAnalysis(false);
+    }
+  }
+
+  if (isLoadingPage) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-8">
+        <p className="text-slate-700">
+          Loading assessment results...
+        </p>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 px-6 py-12">
       <section className="mx-auto max-w-6xl">
         <header className="rounded-xl bg-white p-8 shadow">
-          <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-            Assessment #
-            {numericAssessmentId}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
+                Assessment #
+                {numericAssessmentId}
+              </p>
 
-          <h1 className="mt-2 text-3xl font-bold text-slate-900">
-            Assessment results
-          </h1>
+              <h1 className="mt-2 text-3xl font-bold text-slate-900">
+                Assessment results
+              </h1>
 
-          <p className="mt-3 text-slate-600">
-            Calculate the available question,
-            domain, and overall assessment scores
-            from the saved response counts.
-          </p>
+              <p className="mt-3 max-w-3xl text-slate-600">
+                Review calculated SafePlus
+                scores and generate a
+                source-grounded AI analysis
+                using official WorkSafe
+                SafePlus guidance.
+              </p>
+            </div>
+
+            {assessment && (
+              <span
+                className={`rounded-full px-3 py-1 text-sm font-semibold ${
+                  isAssessmentCompleted
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                {isAssessmentCompleted
+                  ? "Completed"
+                  : assessment.status.replace(
+                      "_",
+                      " ",
+                    )}
+              </span>
+            )}
+          </div>
 
           <div className="mt-6 flex flex-wrap gap-4">
             <button
@@ -243,9 +574,10 @@ function AssessmentResultsPage() {
               }
               disabled={
                 isCalculating ||
-                isCompleting
+                isCompleting ||
+                isGeneratingAnalysis
               }
-              className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isCalculating
                 ? "Calculating scores..."
@@ -260,19 +592,38 @@ function AssessmentResultsPage() {
                 handleCompleteAssessment
               }
               disabled={
+                isAssessmentCompleted ||
                 isCompleting ||
                 isCalculating ||
-                completionResult?.status ===
-                  "completed"
+                isGeneratingAnalysis
               }
-              className="rounded-lg bg-emerald-700 px-5 py-3 font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-emerald-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isCompleting
                 ? "Completing assessment..."
-                : completionResult?.status ===
-                    "completed"
+                : isAssessmentCompleted
                   ? "Assessment completed"
                   : "Complete assessment"}
+            </button>
+
+            <button
+              type="button"
+              onClick={
+                handleGenerateAIAnalysis
+              }
+              disabled={
+                !isAssessmentCompleted ||
+                isGeneratingAnalysis ||
+                isCompleting ||
+                isCalculating
+              }
+              className="rounded-lg bg-violet-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isGeneratingAnalysis
+                ? "Generating AI analysis..."
+                : aiAnalysis
+                  ? "Regenerate AI analysis"
+                  : "Generate AI analysis"}
             </button>
 
             <button
@@ -283,8 +634,7 @@ function AssessmentResultsPage() {
                 )
               }
               disabled={
-                completionResult?.status ===
-                "completed"
+                isAssessmentCompleted
               }
               className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -302,9 +652,23 @@ function AssessmentResultsPage() {
             </button>
           </div>
 
+          {!isAssessmentCompleted && (
+            <div className="mt-6 rounded-lg bg-violet-50 p-4 text-sm text-violet-800">
+              Complete the assessment before
+              generating the WorkSafe-grounded
+              AI analysis.
+            </div>
+          )}
+
           {errorMessage && (
             <div className="mt-6 rounded-lg bg-red-50 p-4 text-red-700">
               {errorMessage}
+            </div>
+          )}
+
+          {analysisMessage && (
+            <div className="mt-6 rounded-lg bg-emerald-50 p-4 text-emerald-800">
+              {analysisMessage}
             </div>
           )}
 
@@ -317,11 +681,11 @@ function AssessmentResultsPage() {
 
               <p className="mt-1 text-sm">
                 Final score:{" "}
-                {Number(
+                {formatScore(
                   completionResult
                     .overall_combined_mean,
-                ).toFixed(2)}
-                {" · "}
+                )}{" "}
+                ·{" "}
                 {
                   completionResult
                     .overall_maturity_label
@@ -355,9 +719,8 @@ function AssessmentResultsPage() {
 
             <p className="mt-2 text-slate-600">
               Click Calculate scores to
-              generate results from the
-              available Employee and Senior
-              Manager responses.
+              generate the available
+              assessment results.
             </p>
           </section>
         ) : (
@@ -471,17 +834,15 @@ function AssessmentResultsPage() {
             </section>
 
             <section className="mt-8 rounded-xl bg-white p-8 shadow">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">
-                  Question scores
-                </h2>
+              <h2 className="text-2xl font-bold text-slate-900">
+                Question scores
+              </h2>
 
-                <p className="mt-2 text-slate-600">
-                  Only questions with both
-                  Employee and Senior Manager
-                  response data are scored.
-                </p>
-              </div>
+              <p className="mt-2 text-slate-600">
+                Questions are scored when both
+                Employee and Senior Manager
+                response data are available.
+              </p>
 
               {results.question_scores
                 .length === 0 ? (
@@ -606,6 +967,496 @@ function AssessmentResultsPage() {
             </section>
           </>
         )}
+
+        <section className="mt-8 rounded-xl bg-white p-8 shadow">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-violet-700">
+                Gemini analysis
+              </p>
+
+              <h2 className="mt-1 text-2xl font-bold text-slate-900">
+                WorkSafe-grounded improvement
+                analysis
+              </h2>
+
+              <p className="mt-2 max-w-3xl text-slate-600">
+                Recommendations use the
+                assessment evidence together
+                with curated official WorkSafe
+                SafePlus guidance.
+              </p>
+            </div>
+
+            {aiAnalysis && (
+              <div className="text-right text-sm text-slate-500">
+                <p className="font-semibold text-slate-700">
+                  {aiAnalysis.ai_provider}
+                </p>
+
+                {aiAnalysis.generated_at && (
+                  <p className="mt-1">
+                    Generated{" "}
+                    {new Date(
+                      aiAnalysis.generated_at,
+                    ).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {!aiAnalysis ? (
+            <div className="mt-8 rounded-lg border border-dashed border-slate-300 p-8 text-center">
+              <h3 className="font-bold text-slate-900">
+                AI analysis has not been
+                generated
+              </h3>
+
+              <p className="mt-2 text-slate-600">
+                Complete the assessment and
+                click Generate AI analysis.
+              </p>
+            </div>
+          ) : aiAnalysis.status !==
+            "completed" ? (
+            <div className="mt-8 rounded-lg bg-amber-50 p-5 text-amber-800">
+              AI analysis status:{" "}
+              <span className="font-semibold capitalize">
+                {aiAnalysis.status}
+              </span>
+            </div>
+          ) : (
+            <div className="mt-8 space-y-8">
+              <article className="rounded-xl bg-violet-50 p-6">
+                <h3 className="text-xl font-bold text-violet-950">
+                  Overall summary
+                </h3>
+
+                <p className="mt-4 whitespace-pre-line leading-7 text-slate-700">
+                  {aiAnalysis.overall_summary}
+                </p>
+              </article>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
+                  <h3 className="text-xl font-bold text-emerald-900">
+                    Key strengths
+                  </h3>
+
+                  {keyStrengths.length ===
+                  0 ? (
+                    <p className="mt-3 text-emerald-800">
+                      No strengths were
+                      returned.
+                    </p>
+                  ) : (
+                    <ul className="mt-4 space-y-3">
+                      {keyStrengths.map(
+                        (strength, index) => (
+                          <li
+                            key={`${strength}-${index}`}
+                            className="flex gap-3 text-slate-700"
+                          >
+                            <span className="font-bold text-emerald-700">
+                              ✓
+                            </span>
+
+                            <span>
+                              {strength}
+                            </span>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  )}
+                </article>
+
+                <article className="rounded-xl border border-red-200 bg-red-50 p-6">
+                  <h3 className="text-xl font-bold text-red-900">
+                    Key risks
+                  </h3>
+
+                  {keyRisks.length === 0 ? (
+                    <p className="mt-3 text-red-800">
+                      No risks were returned.
+                    </p>
+                  ) : (
+                    <ul className="mt-4 space-y-3">
+                      {keyRisks.map(
+                        (risk, index) => (
+                          <li
+                            key={`${risk}-${index}`}
+                            className="flex gap-3 text-slate-700"
+                          >
+                            <span className="font-bold text-red-700">
+                              !
+                            </span>
+
+                            <span>{risk}</span>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  )}
+                </article>
+              </div>
+
+              <section>
+                <h3 className="text-2xl font-bold text-slate-900">
+                  Domain analysis
+                </h3>
+
+                <div className="mt-5 grid gap-5 lg:grid-cols-3">
+                  {aiDomainSummaries.map(
+                    (domainSummary) => (
+                      <article
+                        key={
+                          domainSummary.domain_name
+                        }
+                        className="rounded-xl border border-slate-200 p-6"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <h4 className="font-bold text-slate-900">
+                            {
+                              domainSummary.domain_name
+                            }
+                          </h4>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getMaturityClasses(
+                              domainSummary.maturity_level,
+                            )}`}
+                          >
+                            {
+                              domainSummary.maturity_level
+                            }
+                          </span>
+                        </div>
+
+                        <p className="mt-3 text-3xl font-bold text-slate-900">
+                          {formatScore(
+                            domainSummary.score,
+                          )}
+                        </p>
+
+                        <p className="mt-4 leading-7 text-slate-700">
+                          {
+                            domainSummary.summary
+                          }
+                        </p>
+
+                        {domainSummary
+                          .strengths.length >
+                          0 && (
+                          <div className="mt-5">
+                            <p className="text-sm font-bold text-emerald-800">
+                              Strengths
+                            </p>
+
+                            <ul className="mt-2 space-y-2 text-sm text-slate-700">
+                              {domainSummary.strengths.map(
+                                (
+                                  strength,
+                                  index,
+                                ) => (
+                                  <li
+                                    key={`${strength}-${index}`}
+                                  >
+                                    • {strength}
+                                  </li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
+                        )}
+
+                        {domainSummary
+                          .improvement_areas
+                          .length > 0 && (
+                          <div className="mt-5">
+                            <p className="text-sm font-bold text-orange-800">
+                              Improvement areas
+                            </p>
+
+                            <ul className="mt-2 space-y-2 text-sm text-slate-700">
+                              {domainSummary.improvement_areas.map(
+                                (
+                                  improvement,
+                                  index,
+                                ) => (
+                                  <li
+                                    key={`${improvement}-${index}`}
+                                  >
+                                    •{" "}
+                                    {improvement}
+                                  </li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
+                        )}
+
+                        <SourceLinks
+                          sourceIds={
+                            domainSummary.source_ids
+                          }
+                          sources={
+                            guidanceSources
+                          }
+                        />
+                      </article>
+                    ),
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-2xl font-bold text-slate-900">
+                  Priority actions
+                </h3>
+
+                <div className="mt-5 space-y-5">
+                  {priorityActions.map(
+                    (action) => (
+                      <article
+                        key={`${action.priority}-${action.title}`}
+                        className="rounded-xl border border-slate-200 p-6"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-semibold uppercase tracking-wide text-violet-700">
+                              Priority{" "}
+                              {action.priority}
+                            </p>
+
+                            <h4 className="mt-1 text-xl font-bold text-slate-900">
+                              {action.title}
+                            </h4>
+
+                            <p className="mt-1 text-sm text-slate-500">
+                              {
+                                action.related_domain
+                              }
+                            </p>
+                          </div>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getUrgencyClasses(
+                              action.urgency,
+                            )}`}
+                          >
+                            {action.urgency}
+                          </span>
+                        </div>
+
+                        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                          <div>
+                            <p className="font-bold text-slate-900">
+                              Assessment
+                              evidence
+                            </p>
+
+                            <ul className="mt-2 space-y-2 text-slate-700">
+                              {action.assessment_evidence.map(
+                                (
+                                  evidence,
+                                  index,
+                                ) => (
+                                  <li
+                                    key={`${evidence}-${index}`}
+                                  >
+                                    • {evidence}
+                                  </li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
+
+                          <div>
+                            <p className="font-bold text-slate-900">
+                              Why this matters
+                            </p>
+
+                            <p className="mt-2 leading-7 text-slate-700">
+                              {action.reason}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 rounded-lg bg-slate-50 p-5">
+                          <p className="font-bold text-slate-900">
+                            Recommended action
+                          </p>
+
+                          <p className="mt-2 leading-7 text-slate-700">
+                            {
+                              action.recommended_action
+                            }
+                          </p>
+                        </div>
+
+                        <p className="mt-4 text-sm text-slate-600">
+                          <span className="font-semibold">
+                            Source relevance:
+                          </span>{" "}
+                          {
+                            action.source_relevance
+                          }
+                        </p>
+
+                        <SourceLinks
+                          sourceIds={
+                            action.source_ids
+                          }
+                          sources={
+                            guidanceSources
+                          }
+                        />
+                      </article>
+                    ),
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-2xl font-bold text-slate-900">
+                  Improvement roadmap
+                </h3>
+
+                <div className="mt-5 space-y-4">
+                  {roadmap.map(
+                    (item, index) => (
+                      <article
+                        key={`${item.timeframe}-${index}`}
+                        className="rounded-xl border border-slate-200 p-6"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
+                              {item.timeframe}
+                            </p>
+
+                            <h4 className="mt-1 text-lg font-bold text-slate-900">
+                              {item.objective}
+                            </h4>
+                          </div>
+
+                          <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800">
+                            Step {index + 1}
+                          </span>
+                        </div>
+
+                        <div className="mt-5">
+                          <p className="font-bold text-slate-900">
+                            Actions
+                          </p>
+
+                          <ul className="mt-2 space-y-2 text-slate-700">
+                            {item.actions.map(
+                              (
+                                roadmapAction,
+                                actionIndex,
+                              ) => (
+                                <li
+                                  key={`${roadmapAction}-${actionIndex}`}
+                                >
+                                  •{" "}
+                                  {roadmapAction}
+                                </li>
+                              ),
+                            )}
+                          </ul>
+                        </div>
+
+                        <div className="mt-5 rounded-lg bg-emerald-50 p-4">
+                          <p className="text-sm font-bold text-emerald-900">
+                            Success indicator
+                          </p>
+
+                          <p className="mt-1 text-sm text-emerald-800">
+                            {
+                              item.success_indicator
+                            }
+                          </p>
+                        </div>
+
+                        <SourceLinks
+                          sourceIds={
+                            item.source_ids
+                          }
+                          sources={
+                            guidanceSources
+                          }
+                        />
+                      </article>
+                    ),
+                  )}
+                </div>
+              </section>
+
+              {guidanceSources.length > 0 && (
+                <section className="rounded-xl bg-slate-50 p-6">
+                  <h3 className="text-xl font-bold text-slate-900">
+                    Official guidance sources
+                  </h3>
+
+                  <p className="mt-2 text-sm text-slate-600">
+                    The AI was limited to
+                    curated summaries of these
+                    official WorkSafe SafePlus
+                    resources.
+                  </p>
+
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    {guidanceSources.map(
+                      (source) => (
+                        <a
+                          key={source.source_id}
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-lg border border-slate-200 bg-white p-4 hover:border-cyan-400"
+                        >
+                          <p className="font-bold text-cyan-800">
+                            {source.title}
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            {source.source_id}
+                          </p>
+                        </a>
+                      ),
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {limitations.length > 0 && (
+                <section className="rounded-xl border border-amber-200 bg-amber-50 p-6">
+                  <h3 className="text-xl font-bold text-amber-900">
+                    Important limitations
+                  </h3>
+
+                  <ul className="mt-4 space-y-3 text-amber-900">
+                    {limitations.map(
+                      (
+                        limitation,
+                        index,
+                      ) => (
+                        <li
+                          key={`${limitation}-${index}`}
+                        >
+                          • {limitation}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </section>
+              )}
+            </div>
+          )}
+        </section>
       </section>
     </main>
   );
