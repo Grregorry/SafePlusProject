@@ -416,6 +416,75 @@ def save_public_answer(
         total_question_count=total_question_count,
     )
 
+@router.delete(
+    "/api/public/submissions/{submission_token}/answers/{question_id}",
+    response_model=SaveSurveyAnswerResponse,
+)
+def delete_public_answer(
+    submission_token: str,
+    question_id: int,
+    database: DatabaseSession,
+) -> SaveSurveyAnswerResponse:
+    submission = get_submission(
+        submission_token,
+        database,
+    )
+
+    if submission.status == "submitted":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Submitted surveys cannot be edited.",
+        )
+
+    assessment_question = database.scalar(
+        select(AssessmentQuestion).where(
+            AssessmentQuestion.assessment_id
+            == submission.assessment_id,
+            AssessmentQuestion.question_id
+            == question_id,
+            AssessmentQuestion.is_active.is_(True),
+        )
+    )
+
+    if assessment_question is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Question is not active for this survey.",
+        )
+
+    existing_response = database.scalar(
+        select(IndividualResponse).where(
+            IndividualResponse.submission_id == submission.id,
+            IndividualResponse.assessment_question_id
+            == assessment_question.id,
+        )
+    )
+
+    if existing_response is not None:
+        database.delete(existing_response)
+        database.commit()
+
+    answered_question_count = len(
+        database.scalars(
+            select(IndividualResponse.id).where(
+                IndividualResponse.submission_id == submission.id,
+            )
+        ).all()
+    )
+
+    total_question_count = len(
+        get_active_question_rows(
+            submission.assessment_id,
+            database,
+        )
+    )
+
+    return SaveSurveyAnswerResponse(
+        question_id=question_id,
+        response_option="Agree",
+        answered_question_count=answered_question_count,
+        total_question_count=total_question_count,
+    )
 
 @router.post(
     "/api/public/submissions/{submission_token}/submit",
