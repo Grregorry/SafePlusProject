@@ -6,6 +6,9 @@ from fastapi.middleware.cors import (
 )
 from sqlalchemy import text
 
+from app.api.routes.ai_analysis import (
+    router as ai_analysis_router,
+)
 from app.api.routes.assessment_progress import (
     router as assessment_progress_router,
 )
@@ -54,6 +57,7 @@ app.include_router(
 app.include_router(
     submission_management_router
 )
+app.include_router(ai_analysis_router)
 
 app.add_middleware(
     CORSMiddleware,
