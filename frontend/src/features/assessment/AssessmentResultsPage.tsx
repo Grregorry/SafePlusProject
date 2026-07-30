@@ -26,6 +26,7 @@ import {
 import {
   calculateAssessmentScores,
   completeAssessment,
+  downloadAssessmentReport,
   getAssessment,
   type Assessment,
   type AssessmentCompletionResult,
@@ -63,8 +64,6 @@ function getMaturityClasses(
 
   return "bg-red-100 text-red-800";
 }
-
-
 
 function isHighOverride(
   opinionGap: string | number,
@@ -317,6 +316,11 @@ function AssessmentResultsPage() {
       }),
     ) ?? [];
 
+  const [
+    isDownloadingReport,
+    setIsDownloadingReport,
+  ] = useState(false);
+
   useEffect(() => {
     async function loadPage() {
       const accessToken =
@@ -564,6 +568,48 @@ function AssessmentResultsPage() {
     }
   }
 
+  async function handleDownloadReport() {
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
+
+    if (!accessToken) {
+      navigate("/login", {
+        replace: true,
+      });
+
+      return;
+    }
+
+    if (!isAssessmentCompleted) {
+      setErrorMessage(
+        "Complete the assessment before downloading the report.",
+      );
+
+      return;
+    }
+
+    try {
+      setIsDownloadingReport(true);
+      setErrorMessage("");
+      setAnalysisMessage("");
+
+      await downloadAssessmentReport(
+        numericAssessmentId,
+        accessToken,
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to download the PDF report.",
+      );
+    } finally {
+      setIsDownloadingReport(false);
+    }
+  }
+
   if (isLoadingPage) {
     return (
       <main className="min-h-screen bg-slate-100 p-8">
@@ -627,7 +673,8 @@ function AssessmentResultsPage() {
               disabled={
                 isCalculating ||
                 isCompleting ||
-                isGeneratingAnalysis
+                isGeneratingAnalysis ||
+                isDownloadingReport
               }
               className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -647,7 +694,8 @@ function AssessmentResultsPage() {
                 isAssessmentCompleted ||
                 isCompleting ||
                 isCalculating ||
-                isGeneratingAnalysis
+                isGeneratingAnalysis ||
+                isDownloadingReport
               }
               className="rounded-lg bg-emerald-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -667,7 +715,8 @@ function AssessmentResultsPage() {
                 !isAssessmentCompleted ||
                 isGeneratingAnalysis ||
                 isCompleting ||
-                isCalculating
+                isCalculating ||
+                isDownloadingReport
               }
               className="rounded-lg bg-violet-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -680,13 +729,31 @@ function AssessmentResultsPage() {
 
             <button
               type="button"
+              onClick={handleDownloadReport}
+              disabled={
+                !isAssessmentCompleted ||
+                isDownloadingReport ||
+                isCalculating ||
+                isCompleting ||
+                isGeneratingAnalysis
+              }
+              className="rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isDownloadingReport
+                ? "Preparing PDF..."
+                : "Download PDF report"}
+            </button>
+
+            <button
+              type="button"
               onClick={() =>
                 navigate(
                   `/assessments/${numericAssessmentId}/responses`,
                 )
               }
               disabled={
-                isAssessmentCompleted
+                isAssessmentCompleted ||
+                isDownloadingReport
               }
               className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1033,14 +1100,14 @@ function AssessmentResultsPage() {
                         </div>
 
                         <div
-                            className={`mt-5 grid gap-4 ${
-                              isHighOverride(
-                                questionScore.opinion_gap,
-                              )
-                                ? "sm:grid-cols-3"
-                                : "sm:grid-cols-4"
-                            }`}
-                          >
+                          className={`mt-5 grid gap-4 ${
+                            isHighOverride(
+                              questionScore.opinion_gap,
+                            )
+                              ? "sm:grid-cols-3"
+                              : "sm:grid-cols-4"
+                          }`}
+                        >
                             <div>
                               <p className="text-sm text-slate-500">
                                 Employee mean
@@ -1100,7 +1167,7 @@ function AssessmentResultsPage() {
                                 )}
                               </p>
                             </div>
-                          </div>
+                        </div>
 
                         {isHighOverride(
                           questionScore
