@@ -1,6 +1,11 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Response,
+    status,
+)
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
@@ -9,11 +14,16 @@ from app.api.dependencies import (
     DatabaseSession,
 )
 from app.models import (
+    AIAnalysis,
     Assessment,
     AssessmentQuestion,
     Domain,
     Question,
     ResponseCount,
+)
+
+from app.services.assessment_report import (
+    generate_assessment_report,
 )
 from app.models.question_score import QuestionScore
 from app.schemas.assessment import (
@@ -231,6 +241,59 @@ def get_assessment(
         database,
     )
 
+@router.get(
+    "/{assessment_id}/report",
+    response_class=Response,
+)
+def download_assessment_report(
+    assessment_id: int,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> Response:
+    assessment = get_owned_assessment(
+        assessment_id,
+        organisation.id,
+        database,
+    )
+
+    if assessment.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Complete the assessment before "
+                "downloading the report."
+            ),
+        )
+
+    analysis = database.scalar(
+        select(AIAnalysis).where(
+            AIAnalysis.assessment_id
+            == assessment.id,
+        )
+    )
+
+    pdf_bytes = generate_assessment_report(
+        assessment=assessment,
+        organisation=organisation,
+        analysis=analysis,
+        database=database,
+    )
+
+    safe_filename = (
+        f"safeplus-assessment-"
+        f"{assessment.organisation_assessment_number}"
+        f".pdf"
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{safe_filename}"'
+            ),
+        },
+    )
 
 @router.delete(
     "/{assessment_id}",

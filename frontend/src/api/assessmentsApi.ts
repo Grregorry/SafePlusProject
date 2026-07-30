@@ -424,3 +424,56 @@ export async function completeAssessment(
 
   return response.json() as Promise<AssessmentCompletionResult>;
 }
+
+export async function downloadAssessmentReport(
+  assessmentId: number,
+  accessToken: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/report`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  const pdfBlob = await response.blob();
+
+  const downloadUrl =
+    window.URL.createObjectURL(pdfBlob);
+
+  const contentDisposition =
+    response.headers.get(
+      "Content-Disposition",
+    );
+
+  const filenameMatch =
+    contentDisposition?.match(
+      /filename="?([^"]+)"?/,
+    );
+
+  const filename =
+    filenameMatch?.[1] ??
+    `safeplus-assessment-${assessmentId}.pdf`;
+
+  const link =
+    document.createElement("a");
+
+  link.href = downloadUrl;
+  link.download = filename;
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.URL.revokeObjectURL(
+    downloadUrl,
+  );
+}
