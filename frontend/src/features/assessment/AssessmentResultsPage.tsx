@@ -8,6 +8,16 @@ import {
 } from "react-router-dom";
 
 import {
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
+
+import {
   generateAIAnalysis,
   getAIAnalysis,
   type AIAnalysis,
@@ -54,9 +64,36 @@ function getMaturityClasses(
   return "bg-red-100 text-red-800";
 }
 
+
+
+function isHighOverride(
+  opinionGap: string | number,
+): boolean {
+  return Number(opinionGap) >= 3;
+}
+
+function getQuestionStatusLabel(
+  interventionTier: string,
+  opinionGap: string | number,
+): string {
+  if (isHighOverride(opinionGap)) {
+    return "High Override";
+  }
+
+  return interventionTier;
+}
+
 function getInterventionClasses(
   interventionTier: string,
+  opinionGap?: string | number,
 ): string {
+  if (
+    opinionGap !== undefined &&
+    isHighOverride(opinionGap)
+  ) {
+    return "bg-red-700 text-white";
+  }
+
   if (interventionTier === "High") {
     return "bg-red-100 text-red-800";
   }
@@ -266,6 +303,19 @@ function AssessmentResultsPage() {
 
   const roadmap =
     aiAnalysis?.roadmap ?? [];
+
+  const radarData =
+    results?.domain_scores.map(
+      (domainScore) => ({
+        domain: getDomainName(
+          domainScore.domain_id,
+        ),
+        score: Number(
+          domainScore.combined_mean,
+        ),
+        fullMark: 5,
+      }),
+    ) ?? [];
 
   useEffect(() => {
     async function loadPage() {
@@ -531,12 +581,14 @@ function AssessmentResultsPage() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-                Assessment #
-                {numericAssessmentId}
+                {assessment
+                  ? `Assessment ${assessment.organisation_assessment_number}`
+                  : `Assessment ${numericAssessmentId}`}
               </p>
 
               <h1 className="mt-2 text-3xl font-bold text-slate-900">
-                Assessment results
+                {assessment?.name ??
+                  "Assessment results"}
               </h1>
 
               <p className="mt-3 max-w-3xl text-slate-600">
@@ -834,14 +886,98 @@ function AssessmentResultsPage() {
             </section>
 
             <section className="mt-8 rounded-xl bg-white p-8 shadow">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">
+                    SafePlus domain profile
+                  </h2>
+
+                  <p className="mt-2 max-w-3xl text-slate-600">
+                    The radar chart compares the
+                    combined score for Leadership,
+                    Worker Engagement, and Risk
+                    Management on the 1 to 5
+                    SafePlus scale.
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <p>
+                    1 = lower maturity
+                  </p>
+
+                  <p className="mt-1">
+                    5 = higher maturity
+                  </p>
+                </div>
+              </div>
+
+              {radarData.length === 0 ? (
+                <p className="mt-6 text-slate-600">
+                  No domain data is available
+                  for the radar chart.
+                </p>
+              ) : (
+                <div className="mt-6 h-[420px] w-full">
+                  <ResponsiveContainer
+                    width="100%"
+                    height="100%"
+                  >
+                    <RadarChart
+                      data={radarData}
+                      outerRadius="72%"
+                    >
+                      <PolarGrid />
+
+                      <PolarAngleAxis
+                        dataKey="domain"
+                        tick={{
+                          fill: "#334155",
+                          fontSize: 13,
+                        }}
+                      />
+
+                      <PolarRadiusAxis
+                        angle={90}
+                        domain={[0, 5]}
+                        tickCount={6}
+                        allowDecimals={false}
+                      />
+
+                      <Tooltip
+                        formatter={(value) => [
+                          Number(value).toFixed(2),
+                          "Domain score",
+                        ]}
+                      />
+
+                      <Radar
+                        name="Domain score"
+                        dataKey="score"
+                        stroke="#0e7490"
+                        fill="#0891b2"
+                        fillOpacity={0.3}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </section>
+
+            <section className="mt-8 rounded-xl bg-white p-8 shadow">
               <h2 className="text-2xl font-bold text-slate-900">
-                Question scores
+                Question results
               </h2>
 
-              <p className="mt-2 text-slate-600">
-                Questions are scored when both
-                Employee and Senior Manager
-                response data are available.
+              <p className="mt-2 max-w-3xl text-slate-600">
+                Compare Employee and Senior
+                Manager perceptions directly.
+                Combined means are shown when
+                the groups are reasonably aligned.
+                When the opinion gap is 3.00
+                points or greater, the combined
+                mean is hidden because it could
+                mask opposing perceptions.
               </p>
 
               {results.question_scores
@@ -879,86 +1015,115 @@ function AssessmentResultsPage() {
                             </p>
                           </div>
 
-                          <div className="flex flex-wrap gap-2">
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-semibold ${getMaturityClasses(
-                                questionScore
-                                  .maturity_level,
-                              )}`}
-                            >
-                              {
-                                questionScore
-                                  .maturity_level
-                              }
-                            </span>
-
-                            <span
-                              className={`rounded-full px-3 py-1 text-xs font-semibold ${getInterventionClasses(
-                                questionScore
-                                  .intervention_tier,
-                              )}`}
-                            >
-                              {
-                                questionScore
-                                  .intervention_tier
-                              }
-                            </span>
-                          </div>
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getInterventionClasses(
+                              questionScore
+                                .intervention_tier,
+                              questionScore
+                                .opinion_gap,
+                            )}`}
+                          >
+                            {getQuestionStatusLabel(
+                              questionScore
+                                .intervention_tier,
+                              questionScore
+                                .opinion_gap,
+                            )}
+                          </span>
                         </div>
 
-                        <div className="mt-5 grid gap-4 sm:grid-cols-4">
-                          <div>
-                            <p className="text-sm text-slate-500">
-                              Employee mean
-                            </p>
+                        <div
+                            className={`mt-5 grid gap-4 ${
+                              isHighOverride(
+                                questionScore.opinion_gap,
+                              )
+                                ? "sm:grid-cols-3"
+                                : "sm:grid-cols-4"
+                            }`}
+                          >
+                            <div>
+                              <p className="text-sm text-slate-500">
+                                Employee mean
+                              </p>
 
-                            <p className="mt-1 text-xl font-bold text-slate-900">
-                              {formatScore(
-                                questionScore
-                                  .employee_mean,
-                              )}
-                            </p>
+                              <p className="mt-1 text-xl font-bold text-slate-900">
+                                {formatScore(
+                                  questionScore.employee_mean,
+                                )}
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-sm text-slate-500">
+                                Senior Manager mean
+                              </p>
+
+                              <p className="mt-1 text-xl font-bold text-slate-900">
+                                {formatScore(
+                                  questionScore.manager_mean,
+                                )}
+                              </p>
+                            </div>
+
+                            {!isHighOverride(
+                              questionScore.opinion_gap,
+                            ) && (
+                              <div>
+                                <p className="text-sm text-slate-500">
+                                  Combined mean
+                                </p>
+
+                                <p className="mt-1 text-xl font-bold text-slate-900">
+                                  {formatScore(
+                                    questionScore.combined_mean,
+                                  )}
+                                </p>
+                              </div>
+                            )}
+
+                            <div>
+                              <p className="text-sm text-slate-500">
+                                Opinion gap
+                              </p>
+
+                              <p
+                                className={`mt-1 text-xl font-bold ${
+                                  isHighOverride(
+                                    questionScore.opinion_gap,
+                                  )
+                                    ? "text-red-700"
+                                    : "text-slate-900"
+                                }`}
+                              >
+                                {formatScore(
+                                  questionScore.opinion_gap,
+                                )}
+                              </p>
+                            </div>
                           </div>
 
-                          <div>
-                            <p className="text-sm text-slate-500">
-                              Manager mean
+                        {isHighOverride(
+                          questionScore
+                            .opinion_gap,
+                        ) && (
+                          <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4">
+                            <p className="font-semibold text-red-900">
+                              Extreme perception
+                              difference
                             </p>
 
-                            <p className="mt-1 text-xl font-bold text-slate-900">
-                              {formatScore(
-                                questionScore
-                                  .manager_mean,
-                              )}
+                            <p className="mt-1 text-sm leading-6 text-red-800">
+                              The Employee and
+                              Senior Manager scores
+                              differ by 3.00 points
+                              or more. The combined
+                              average is not shown
+                              because it could hide
+                              the opposing
+                              perceptions.
                             </p>
                           </div>
-
-                          <div>
-                            <p className="text-sm text-slate-500">
-                              Combined mean
-                            </p>
-
-                            <p className="mt-1 text-xl font-bold text-slate-900">
-                              {formatScore(
-                                questionScore
-                                  .combined_mean,
-                              )}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-sm text-slate-500">
-                              Opinion gap
-                            </p>
-
-                            <p className="mt-1 text-xl font-bold text-slate-900">
-                              {formatScore(
-                                questionScore
-                                  .opinion_gap,
-                              )}
-                            </p>
-                          </div>
-                        </div>
+                        )}
                       </article>
                     ),
                   )}
