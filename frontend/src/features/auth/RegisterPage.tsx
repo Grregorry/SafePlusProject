@@ -1,20 +1,69 @@
-import { type FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import {
+  type FormEvent,
+  useState,
+} from "react";
+import {
+  Link,
+  useNavigate,
+} from "react-router-dom";
 
-import { registerOrganisation } from "../../api/authApi";
+import {
+  registerOrganisation,
+  type OrganisationCategory,
+} from "../../api/authApi";
+
+const ORGANISATION_CATEGORIES: OrganisationCategory[] =
+  [
+    "Construction",
+    "Mining and quarrying",
+    "Manufacturing",
+    "Healthcare",
+    "Transport and logistics",
+    "Agriculture",
+    "Retail",
+    "Hospitality",
+    "Professional services",
+    "Other",
+  ];
 
 function RegisterPage() {
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
+
+  const [
+    category,
+    setCategory,
+  ] = useState<OrganisationCategory | "">("");
+
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [
+    password,
+    setPassword,
+  ] = useState("");
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const [
+    isSubmitting,
+    setIsSubmitting,
+  ] = useState(false);
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState("");
+
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
+
+    if (!category) {
+      setErrorMessage(
+        "Select an organisation category.",
+      );
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -22,13 +71,15 @@ function RegisterPage() {
 
       await registerOrganisation({
         name,
+        category,
         email,
         password,
       });
 
       navigate("/login", {
         state: {
-          message: "Account created successfully. You can now log in.",
+          message:
+            "Account created successfully. You can now log in.",
         },
       });
     } catch (error) {
@@ -63,7 +114,10 @@ function RegisterPage() {
           </div>
         )}
 
-        <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+        <form
+          className="mt-8 space-y-5"
+          onSubmit={handleSubmit}
+        >
           <div>
             <label
               htmlFor="organisation-name"
@@ -76,12 +130,56 @@ function RegisterPage() {
               id="organisation-name"
               type="text"
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) =>
+                setName(event.target.value)
+              }
               minLength={2}
               maxLength={200}
               required
               className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-3"
             />
+          </div>
+
+          <div>
+            <label
+              htmlFor="organisation-category"
+              className="block text-sm font-medium text-slate-700"
+            >
+              Organisation category
+            </label>
+
+            <select
+              id="organisation-category"
+              value={category}
+              onChange={(event) =>
+                setCategory(
+                  event.target.value as
+                    | OrganisationCategory
+                    | "",
+                )
+              }
+              required
+              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-4 py-3"
+            >
+              <option value="">
+                Select a category
+              </option>
+
+              {ORGANISATION_CATEGORIES.map(
+                (categoryOption) => (
+                  <option
+                    key={categoryOption}
+                    value={categoryOption}
+                  >
+                    {categoryOption}
+                  </option>
+                ),
+              )}
+            </select>
+
+            <p className="mt-2 text-sm text-slate-500">
+              This helps make the AI analysis more relevant to your sector.
+            </p>
           </div>
 
           <div>
@@ -96,7 +194,9 @@ function RegisterPage() {
               id="registration-email"
               type="email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) =>
+                setEmail(event.target.value)
+              }
               required
               className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-3"
             />
@@ -114,7 +214,9 @@ function RegisterPage() {
               id="registration-password"
               type="password"
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) =>
+                setPassword(event.target.value)
+              }
               minLength={8}
               maxLength={128}
               required
@@ -131,13 +233,18 @@ function RegisterPage() {
             disabled={isSubmitting}
             className="w-full rounded-lg bg-cyan-700 px-4 py-3 font-semibold text-white disabled:opacity-60"
           >
-            {isSubmitting ? "Creating account..." : "Create account"}
+            {isSubmitting
+              ? "Creating account..."
+              : "Create account"}
           </button>
         </form>
 
         <p className="mt-6 text-sm text-slate-600">
           Already registered?{" "}
-          <Link to="/login" className="font-semibold text-cyan-700">
+          <Link
+            to="/login"
+            className="font-semibold text-cyan-700"
+          >
             Log in
           </Link>
         </p>

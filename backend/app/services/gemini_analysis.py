@@ -20,6 +20,7 @@ from app.models import (
     AssessmentQuestion,
     Domain,
     DomainScore,
+    Organisation,
     Question,
 )
 from app.models.question_score import (
@@ -50,6 +51,22 @@ def build_assessment_data(
     assessment: Assessment,
     database: Session,
 ) -> dict[str, object]:
+    organisation = database.scalar(
+        select(Organisation).where(
+            Organisation.id
+            == assessment.organisation_id
+        )
+    )
+
+    if organisation is None:
+        raise GeminiAnalysisError(
+            (
+                "The organisation linked to "
+                "this assessment could not "
+                "be found."
+            )
+        )
+
     domain_rows = database.execute(
         select(
             Domain,
@@ -161,6 +178,11 @@ def build_assessment_data(
 
     return {
         "assessment_id": assessment.id,
+        "assessment_name": assessment.name,
+        "organisation": {
+            "name": organisation.name,
+            "category": organisation.category,
+        },
         "overall_combined_mean": (
             decimal_to_float(
                 assessment.overall_combined_mean
@@ -188,6 +210,33 @@ def build_guidance_data() -> dict[str, object]:
 def build_analysis_prompt(
     assessment_data: dict[str, object],
 ) -> str:
+    organisation_data = (
+        assessment_data.get(
+            "organisation",
+            {},
+        )
+    )
+
+    organisation_category = "Other"
+
+    if isinstance(
+        organisation_data,
+        dict,
+    ):
+        category_value = (
+            organisation_data.get(
+                "category"
+            )
+        )
+
+        if isinstance(
+            category_value,
+            str,
+        ):
+            organisation_category = (
+                category_value
+            )
+
     assessment_json = json.dumps(
         assessment_data,
         indent=2,
@@ -203,6 +252,19 @@ def build_analysis_prompt(
     return f"""
 You are generating a SafePlus workplace health and safety
 self-assessment analysis for an organisation.
+
+Organisation category:
+
+{organisation_category}
+
+Use the organisation category to make the wording, examples,
+risk priorities, and recommended actions more relevant to the
+organisation's sector, but only where this is supported by the
+supplied assessment evidence and approved WorkSafe guidance.
+
+Do not invent sector-specific incidents, hazards, legal duties,
+regulations, compliance findings, worker statements, or
+organisation details.
 
 You must use only:
 
@@ -242,27 +304,30 @@ Required analysis behaviour:
 4. Use constructive and professional language.
 5. Recommend practical actions suitable for workplace
    managers and health and safety teams.
-6. Do not invent workplace incidents, legal breaches,
+6. Tailor recommendations to the organisation category where
+   supported by the supplied assessment evidence and approved
+   WorkSafe guidance.
+7. Do not invent workplace incidents, legal breaches,
    policies, worker statements, or organisation details.
-7. Do not provide legal advice.
-8. Do not state that the organisation is legally compliant
+8. Do not provide legal advice.
+9. Do not state that the organisation is legally compliant
    or non-compliant.
-9. Do not claim that this analysis replaces a qualified
-   SafePlus assessor.
-10. Every domain summary, priority action, and roadmap item
+10. Do not claim that this analysis replaces a qualified
+    SafePlus assessor.
+11. Every domain summary, priority action, and roadmap item
     must include valid source IDs from the supplied official
     source list.
-11. Every priority action must explain the relevant
+12. Every priority action must explain the relevant
     assessment evidence.
-12. Order priority actions from most urgent to least urgent.
-13. Use practical roadmap timeframes such as:
+13. Order priority actions from most urgent to least urgent.
+14. Use practical roadmap timeframes such as:
     - Immediate or 0 to 30 days
     - Short term or 1 to 3 months
     - Medium term or 3 to 6 months
     - Longer term or 6 to 12 months
-14. Include the supplied AI limitations in the limitations
+15. Include the supplied AI limitations in the limitations
     section, using clear wording.
-15. Return all required fields in the structured response.
+16. Return all required fields in the structured response.
 
 Assessment data:
 
@@ -279,17 +344,22 @@ def validate_source_ids(
 ) -> None:
     valid_source_ids = {
         str(source["source_id"])
-        for source in SAFEPLUS_GUIDANCE_SOURCES
+        for source
+        in SAFEPLUS_GUIDANCE_SOURCES
     }
 
     referenced_source_ids: list[str] = []
 
-    for domain_summary in generated.domain_summaries:
+    for domain_summary in (
+        generated.domain_summaries
+    ):
         referenced_source_ids.extend(
             domain_summary.source_ids
         )
 
-    for priority_action in generated.priority_actions:
+    for priority_action in (
+        generated.priority_actions
+    ):
         referenced_source_ids.extend(
             priority_action.source_ids
         )
@@ -304,7 +374,8 @@ def validate_source_ids(
             source_id
             for source_id
             in referenced_source_ids
-            if source_id not in valid_source_ids
+            if source_id
+            not in valid_source_ids
         }
     )
 
@@ -314,8 +385,11 @@ def validate_source_ids(
         )
 
         raise GeminiAnalysisError(
-            "Gemini referenced unsupported SafePlus "
-            f"sources: {invalid_values}."
+            (
+                "Gemini referenced unsupported "
+                "SafePlus sources: "
+                f"{invalid_values}."
+            )
         )
 
 
@@ -325,7 +399,10 @@ def generate_gemini_analysis(
 ) -> GeneratedAIAnalysis:
     if not settings.gemini_api_key:
         raise GeminiAnalysisError(
-            "GEMINI_API_KEY is not configured."
+            (
+                "GEMINI_API_KEY is not "
+                "configured."
+            )
         )
 
     if (
@@ -335,13 +412,18 @@ def generate_gemini_analysis(
         is None
     ):
         raise GeminiAnalysisError(
-            "Assessment scores must be calculated "
-            "before AI analysis can be generated."
+            (
+                "Assessment scores must be "
+                "calculated before AI analysis "
+                "can be generated."
+            )
         )
 
-    assessment_data = build_assessment_data(
-        assessment,
-        database,
+    assessment_data = (
+        build_assessment_data(
+            assessment,
+            database,
+        )
     )
 
     domains = assessment_data.get(
@@ -352,10 +434,16 @@ def generate_gemini_analysis(
         "questions",
     )
 
-    if not isinstance(domains, list) or not domains:
+    if (
+        not isinstance(domains, list)
+        or not domains
+    ):
         raise GeminiAnalysisError(
-            "No domain scores are available for "
-            "this assessment."
+            (
+                "No domain scores are "
+                "available for this "
+                "assessment."
+            )
         )
 
     if (
@@ -363,8 +451,11 @@ def generate_gemini_analysis(
         or not questions
     ):
         raise GeminiAnalysisError(
-            "No question scores are available for "
-            "this assessment."
+            (
+                "No question scores are "
+                "available for this "
+                "assessment."
+            )
         )
 
     client = genai.Client(
@@ -372,18 +463,27 @@ def generate_gemini_analysis(
     )
 
     try:
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=build_analysis_prompt(
-                assessment_data
-            ),
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                response_mime_type=(
-                    "application/json"
+        response = (
+            client.models.generate_content(
+                model=settings.gemini_model,
+                contents=(
+                    build_analysis_prompt(
+                        assessment_data
+                    )
                 ),
-                response_schema=GeneratedAIAnalysis,
-            ),
+                config=(
+                    types
+                    .GenerateContentConfig(
+                        temperature=0.2,
+                        response_mime_type=(
+                            "application/json"
+                        ),
+                        response_schema=(
+                            GeneratedAIAnalysis
+                        ),
+                    )
+                ),
+            )
         )
     except Exception as error:
         logger.exception(
@@ -391,14 +491,21 @@ def generate_gemini_analysis(
         )
 
         raise GeminiAnalysisError(
-            "Gemini could not generate the analysis. "
-            "Check the API key, model access, quota, "
-            "and internet connection, then try again."
+            (
+                "Gemini could not generate "
+                "the analysis. Check the API "
+                "key, model access, quota, "
+                "and internet connection, "
+                "then try again."
+            )
         ) from error
 
     if not response.text:
         raise GeminiAnalysisError(
-            "Gemini returned an empty response."
+            (
+                "Gemini returned an empty "
+                "response."
+            )
         )
 
     try:
@@ -410,12 +517,18 @@ def generate_gemini_analysis(
         )
     except ValidationError as error:
         logger.exception(
-            "Gemini returned invalid structured data"
+            (
+                "Gemini returned invalid "
+                "structured data"
+            )
         )
 
         raise GeminiAnalysisError(
-            "Gemini returned an invalid analysis "
-            "format. Please try again."
+            (
+                "Gemini returned an invalid "
+                "analysis format. Please "
+                "try again."
+            )
         ) from error
 
     validate_source_ids(generated)
