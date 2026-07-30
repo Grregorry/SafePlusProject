@@ -65,6 +65,8 @@ function getMaturityClasses(
   return "bg-red-100 text-red-800";
 }
 
+
+
 function isHighOverride(
   opinionGap: string | number,
 ): boolean {
@@ -81,6 +83,14 @@ function getQuestionStatusLabel(
 
   return interventionTier;
 }
+
+type QuestionResultFilter =
+  | "All"
+  | "High Override"
+  | "High"
+  | "Medium"
+  | "Low"
+  | "Not flagged";
 
 function getInterventionClasses(
   interventionTier: string,
@@ -274,6 +284,13 @@ function AssessmentResultsPage() {
     setAnalysisMessage,
   ] = useState("");
 
+  const [
+    questionResultFilter,
+    setQuestionResultFilter,
+  ] = useState<QuestionResultFilter>(
+    "All",
+  );
+
   const isAssessmentCompleted =
     assessment?.status === "completed" ||
     completionResult?.status ===
@@ -314,6 +331,24 @@ function AssessmentResultsPage() {
         ),
         fullMark: 5,
       }),
+    ) ?? [];
+
+  const filteredQuestionScores =
+    results?.question_scores.filter(
+      (questionScore) => {
+        if (
+          questionResultFilter === "All"
+        ) {
+          return true;
+        }
+
+        return (
+          getQuestionStatusLabel(
+            questionScore.intervention_tier,
+            questionScore.opinion_gap,
+          ) === questionResultFilter
+        );
+      },
     ) ?? [];
 
   const [
@@ -673,8 +708,7 @@ function AssessmentResultsPage() {
               disabled={
                 isCalculating ||
                 isCompleting ||
-                isGeneratingAnalysis ||
-                isDownloadingReport
+                isGeneratingAnalysis
               }
               className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -694,8 +728,7 @@ function AssessmentResultsPage() {
                 isAssessmentCompleted ||
                 isCompleting ||
                 isCalculating ||
-                isGeneratingAnalysis ||
-                isDownloadingReport
+                isGeneratingAnalysis
               }
               className="rounded-lg bg-emerald-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -715,8 +748,7 @@ function AssessmentResultsPage() {
                 !isAssessmentCompleted ||
                 isGeneratingAnalysis ||
                 isCompleting ||
-                isCalculating ||
-                isDownloadingReport
+                isCalculating
               }
               className="rounded-lg bg-violet-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -752,8 +784,7 @@ function AssessmentResultsPage() {
                 )
               }
               disabled={
-                isAssessmentCompleted ||
-                isDownloadingReport
+                isAssessmentCompleted
               }
               className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1047,15 +1078,84 @@ function AssessmentResultsPage() {
                 mask opposing perceptions.
               </p>
 
+              <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <label
+                    htmlFor="question-result-filter"
+                    className="block text-sm font-semibold text-slate-700"
+                  >
+                    Filter by intervention tier
+                  </label>
+
+                  <select
+                    id="question-result-filter"
+                    value={questionResultFilter}
+                    onChange={(event) =>
+                      setQuestionResultFilter(
+                        event.target
+                          .value as QuestionResultFilter,
+                      )
+                    }
+                    className="mt-2 min-w-56 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-slate-900 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+                  >
+                    <option value="All">
+                      Show all
+                    </option>
+                    <option value="High Override">
+                      High Override
+                    </option>
+                    <option value="High">
+                      High
+                    </option>
+                    <option value="Medium">
+                      Medium
+                    </option>
+                    <option value="Low">
+                      Low
+                    </option>
+                    <option value="Not flagged">
+                      Not flagged
+                    </option>
+                  </select>
+                </div>
+
+                <p className="text-sm text-slate-500">
+                  Showing{" "}
+                  <span className="font-semibold text-slate-700">
+                    {filteredQuestionScores.length}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-semibold text-slate-700">
+                    {
+                      results.question_scores
+                        .length
+                    }
+                  </span>{" "}
+                  questions
+                </p>
+              </div>
+
               {results.question_scores
                 .length === 0 ? (
                 <p className="mt-6 text-slate-600">
                   No questions could be
                   scored yet.
                 </p>
+              ) : filteredQuestionScores.length ===
+                0 ? (
+                <div className="mt-6 rounded-lg border border-dashed border-slate-300 p-6 text-center">
+                  <p className="font-semibold text-slate-900">
+                    No questions match this filter
+                  </p>
+
+                  <p className="mt-2 text-sm text-slate-600">
+                    Choose another intervention
+                    tier or select Show all.
+                  </p>
+                </div>
               ) : (
                 <div className="mt-6 space-y-4">
-                  {results.question_scores.map(
+                  {filteredQuestionScores.map(
                     (questionScore) => (
                       <article
                         key={
@@ -1100,14 +1200,14 @@ function AssessmentResultsPage() {
                         </div>
 
                         <div
-                          className={`mt-5 grid gap-4 ${
-                            isHighOverride(
-                              questionScore.opinion_gap,
-                            )
-                              ? "sm:grid-cols-3"
-                              : "sm:grid-cols-4"
-                          }`}
-                        >
+                            className={`mt-5 grid gap-4 ${
+                              isHighOverride(
+                                questionScore.opinion_gap,
+                              )
+                                ? "sm:grid-cols-3"
+                                : "sm:grid-cols-4"
+                            }`}
+                          >
                             <div>
                               <p className="text-sm text-slate-500">
                                 Employee mean
@@ -1167,7 +1267,7 @@ function AssessmentResultsPage() {
                                 )}
                               </p>
                             </div>
-                        </div>
+                          </div>
 
                         {isHighOverride(
                           questionScore
