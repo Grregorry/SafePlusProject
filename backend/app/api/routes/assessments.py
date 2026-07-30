@@ -18,6 +18,7 @@ from app.models import (
 from app.models.question_score import QuestionScore
 from app.schemas.assessment import (
     AssessmentCompletionResponse,
+    AssessmentCreateRequest,
     AssessmentQuestionSetupResponse,
     AssessmentResponse,
     AssessmentScoringResponse,
@@ -146,11 +147,35 @@ def get_active_assessment_question(
     status_code=status.HTTP_201_CREATED,
 )
 def create_assessment(
+    assessment_input: AssessmentCreateRequest,
     organisation: CurrentOrganisation,
     database: DatabaseSession,
 ) -> Assessment:
+    highest_existing_number = (
+        database.scalar(
+            select(
+                func.max(
+                    Assessment
+                    .organisation_assessment_number
+                )
+            ).where(
+                Assessment.organisation_id
+                == organisation.id
+            )
+        )
+        or 0
+    )
+
+    next_assessment_number = (
+        highest_existing_number + 1
+    )
+
     assessment = Assessment(
         organisation_id=organisation.id,
+        organisation_assessment_number=(
+            next_assessment_number
+        ),
+        name=assessment_input.name,
         status="draft",
     )
 
@@ -166,7 +191,6 @@ def create_assessment(
     database.refresh(assessment)
 
     return assessment
-
 
 @router.get(
     "",
@@ -206,6 +230,25 @@ def get_assessment(
         organisation.id,
         database,
     )
+
+
+@router.delete(
+    "/{assessment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_assessment(
+    assessment_id: int,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> None:
+    assessment = get_owned_assessment(
+        assessment_id,
+        organisation.id,
+        database,
+    )
+
+    database.delete(assessment)
+    database.commit()
 
 
 @router.get(
