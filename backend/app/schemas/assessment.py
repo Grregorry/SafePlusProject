@@ -2,11 +2,46 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 
+class AssessmentCreateRequest(
+    BaseModel
+):
+    name: str = Field(
+        min_length=1,
+        max_length=150,
+    )
 
-class AssessmentQuestionSetupResponse(BaseModel):
+    @field_validator("name")
+    @classmethod
+    def clean_name(
+        cls,
+        value: str,
+    ) -> str:
+        cleaned_name = " ".join(
+            value.split()
+        )
+
+        if not cleaned_name:
+            raise ValueError(
+                (
+                    "Assessment name cannot "
+                    "be empty."
+                )
+            )
+
+        return cleaned_name
+
+
+class AssessmentQuestionSetupResponse(
+    BaseModel
+):
     question_id: int
     question_number: str
     domain_name: str
@@ -17,21 +52,33 @@ class AssessmentQuestionSetupResponse(BaseModel):
     is_active: bool
 
 
-class SituationQuestionSelectionRequest(BaseModel):
-    question_ids: list[int] = Field(default_factory=list)
+class SituationQuestionSelectionRequest(
+    BaseModel
+):
+    question_ids: list[int] = Field(
+        default_factory=list
+    )
+
 
 class AssessmentResponse(BaseModel):
     id: int
     organisation_id: int
+    organisation_assessment_number: int
+    name: str
     status: str
     created_at: datetime
     completed_at: datetime | None
-    overall_combined_mean: Decimal | None
-    overall_maturity_label: str | None
+    overall_combined_mean: (
+        Decimal | None
+    )
+    overall_maturity_label: (
+        str | None
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
     )
+
 
 class ResponseCountInput(BaseModel):
     response_option: Literal[
@@ -48,16 +95,22 @@ class ResponseCountInput(BaseModel):
     )
 
 
-class QuestionResponsesUpdate(BaseModel):
+class QuestionResponsesUpdate(
+    BaseModel
+):
     respondent_group: Literal[
         "Employee",
         "Senior Manager",
     ]
 
-    responses: list[ResponseCountInput]
+    responses: list[
+        ResponseCountInput
+    ]
 
 
-class ResponseCountResponse(BaseModel):
+class ResponseCountResponse(
+    BaseModel
+):
     response_option: str
     count: int
 
@@ -66,13 +119,20 @@ class ResponseCountResponse(BaseModel):
     )
 
 
-class QuestionResponsesResponse(BaseModel):
+class QuestionResponsesResponse(
+    BaseModel
+):
     assessment_id: int
     question_id: int
     respondent_group: str
-    responses: list[ResponseCountResponse]
+    responses: list[
+        ResponseCountResponse
+    ]
 
-class QuestionScoreResponse(BaseModel):
+
+class QuestionScoreResponse(
+    BaseModel
+):
     question_id: int
     question_number: str
     employee_mean: Decimal
@@ -89,21 +149,36 @@ class DomainScoreResponse(BaseModel):
     maturity_level: str
 
 
-class AssessmentScoringResponse(BaseModel):
+class AssessmentScoringResponse(
+    BaseModel
+):
     assessment_id: int
     questions_scored: int
-    question_scores: list[QuestionScoreResponse]
-    domain_scores: list[DomainScoreResponse]
-    overall_combined_mean: Decimal | None
-    overall_maturity_label: str | None
+    question_scores: list[
+        QuestionScoreResponse
+    ]
+    domain_scores: list[
+        DomainScoreResponse
+    ]
+    overall_combined_mean: (
+        Decimal | None
+    )
+    overall_maturity_label: (
+        str | None
+    )
 
-class IncompleteQuestionResponse(BaseModel):
+
+class IncompleteQuestionResponse(
+    BaseModel
+):
     question_id: int
     question_number: str
     missing_groups: list[str]
 
 
-class AssessmentCompletionResponse(BaseModel):
+class AssessmentCompletionResponse(
+    BaseModel
+):
     assessment_id: int
     status: str
     completed_at: datetime

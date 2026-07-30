@@ -9,28 +9,42 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
+    UniqueConstraint,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    Mapped,
+    mapped_column,
+    relationship,
+)
 
 from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.ai_analysis import AIAnalysis
-    from app.models.assessment_question import AssessmentQuestion
+    from app.models.assessment_question import (
+        AssessmentQuestion,
+    )
     from app.models.domain_score import DomainScore
     from app.models.organisation import Organisation
-    from app.models.survey_submission import SurveySubmission
+    from app.models.survey_submission import (
+        SurveySubmission,
+    )
 
 
-PUBLIC_CODE_CHARACTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+PUBLIC_CODE_CHARACTERS = (
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+)
 
 
 def generate_public_code() -> str:
     random_part = "".join(
-        secrets.choice(PUBLIC_CODE_CHARACTERS)
+        secrets.choice(
+            PUBLIC_CODE_CHARACTERS
+        )
         for _ in range(8)
     )
 
@@ -41,28 +55,59 @@ class Assessment(Base):
     __tablename__ = "assessment"
 
     __table_args__ = (
+        UniqueConstraint(
+            "organisation_id",
+            "organisation_assessment_number",
+            name=(
+                "uq_assessment_organisation_number"
+            ),
+        ),
         CheckConstraint(
-            "status IN ('draft', 'in_progress', 'completed')",
+            (
+                "organisation_assessment_number "
+                ">= 1"
+            ),
+            name=(
+                "ck_assessment_organisation_number"
+            ),
+        ),
+        CheckConstraint(
+            (
+                "status IN "
+                "('draft', 'in_progress', "
+                "'completed')"
+            ),
             name="ck_assessment_status",
         ),
         CheckConstraint(
             (
-                "overall_combined_mean IS NULL OR "
-                "overall_combined_mean BETWEEN 1.00 AND 5.00"
+                "overall_combined_mean IS NULL "
+                "OR overall_combined_mean "
+                "BETWEEN 1.00 AND 5.00"
             ),
-            name="ck_assessment_overall_mean",
+            name=(
+                "ck_assessment_overall_mean"
+            ),
         ),
         CheckConstraint(
             (
-                "overall_maturity_label IS NULL OR "
-                "overall_maturity_label IN "
-                "('Developing', 'Performing', 'Leading')"
+                "overall_maturity_label IS NULL "
+                "OR overall_maturity_label IN "
+                "('Developing', 'Performing', "
+                "'Leading')"
             ),
-            name="ck_assessment_maturity_label",
+            name=(
+                "ck_assessment_maturity_label"
+            ),
         ),
         CheckConstraint(
-            "completed_at IS NULL OR completed_at >= created_at",
-            name="ck_assessment_completion_time",
+            (
+                "completed_at IS NULL "
+                "OR completed_at >= created_at"
+            ),
+            name=(
+                "ck_assessment_completion_time"
+            ),
         ),
     )
 
@@ -70,19 +115,35 @@ class Assessment(Base):
         primary_key=True,
     )
 
-    organisation_id: Mapped[int] = mapped_column(
-        ForeignKey(
-            "organisation.id",
-            ondelete="CASCADE",
-        ),
+    organisation_id: Mapped[int] = (
+        mapped_column(
+            ForeignKey(
+                "organisation.id",
+                ondelete="CASCADE",
+            ),
+            nullable=False,
+        )
+    )
+
+    organisation_assessment_number: Mapped[
+        int
+    ] = mapped_column(
+        Integer,
         nullable=False,
     )
 
-    public_code: Mapped[str] = mapped_column(
-        String(16),
+    name: Mapped[str] = mapped_column(
+        String(150),
         nullable=False,
-        unique=True,
-        default=generate_public_code,
+    )
+
+    public_code: Mapped[str] = (
+        mapped_column(
+            String(16),
+            nullable=False,
+            unique=True,
+            default=generate_public_code,
+        )
     )
 
     status: Mapped[str] = mapped_column(
@@ -92,28 +153,38 @@ class Assessment(Base):
         server_default="draft",
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
+    created_at: Mapped[datetime] = (
+        mapped_column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=func.now(),
+        )
     )
 
-    completed_at: Mapped[datetime | None] = mapped_column(
+    completed_at: Mapped[
+        datetime | None
+    ] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
 
-    overall_combined_mean: Mapped[Decimal | None] = mapped_column(
+    overall_combined_mean: Mapped[
+        Decimal | None
+    ] = mapped_column(
         Numeric(3, 2),
         nullable=True,
     )
 
-    overall_maturity_label: Mapped[str | None] = mapped_column(
+    overall_maturity_label: Mapped[
+        str | None
+    ] = mapped_column(
         String(20),
         nullable=True,
     )
 
-    organisation: Mapped["Organisation"] = relationship(
+    organisation: Mapped[
+        "Organisation"
+    ] = relationship(
         back_populates="assessments",
     )
 
@@ -125,13 +196,17 @@ class Assessment(Base):
         passive_deletes=True,
     )
 
-    domain_scores: Mapped[list["DomainScore"]] = relationship(
+    domain_scores: Mapped[
+        list["DomainScore"]
+    ] = relationship(
         back_populates="assessment",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
 
-    ai_analysis: Mapped["AIAnalysis | None"] = relationship(
+    ai_analysis: Mapped[
+        "AIAnalysis | None"
+    ] = relationship(
         back_populates="assessment",
         cascade="all, delete-orphan",
         passive_deletes=True,

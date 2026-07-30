@@ -1,6 +1,8 @@
 export type Assessment = {
   id: number;
   organisation_id: number;
+  organisation_assessment_number: number;
+  name: string;
   status: string;
   created_at: string;
   completed_at: string | null;
@@ -174,12 +176,40 @@ export async function getAssessments(
 }
 
 export async function createAssessment(
+  name: string,
   accessToken: string,
 ): Promise<Assessment> {
   const response = await fetch(
     `${API_BASE_URL}/api/assessments`,
     {
       method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  return response.json() as Promise<Assessment>;
+}
+
+export async function deleteAssessment(
+  assessmentId: number,
+  accessToken: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}`,
+    {
+      method: "DELETE",
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -191,8 +221,6 @@ export async function createAssessment(
       await getErrorMessage(response),
     );
   }
-
-  return response.json() as Promise<Assessment>;
 }
 
 export async function getAssessment(

@@ -11,6 +11,7 @@ import {
 } from "../../api/assessmentProgressApi";
 import {
   createAssessment,
+  deleteAssessment,
   getAssessments,
   type Assessment,
 } from "../../api/assessmentsApi";
@@ -66,9 +67,7 @@ function AccountPage() {
   const [
     organisation,
     setOrganisation,
-  ] = useState<Organisation | null>(
-    null,
-  );
+  ] = useState<Organisation | null>(null);
 
   const [
     assessments,
@@ -81,6 +80,21 @@ function AccountPage() {
   ] = useState<
     Record<number, AssessmentDashboardData>
   >({});
+
+  const [
+    assessmentName,
+    setAssessmentName,
+  ] = useState("");
+
+  const [
+    showCreateForm,
+    setShowCreateForm,
+  ] = useState(false);
+
+  const [
+    deletingAssessmentId,
+    setDeletingAssessmentId,
+  ] = useState<number | null>(null);
 
   const [isLoading, setIsLoading] =
     useState(true);
@@ -106,10 +120,7 @@ function AccountPage() {
   ) {
     const loadingState =
       assessmentList.reduce<
-        Record<
-          number,
-          AssessmentDashboardData
-        >
+        Record<number, AssessmentDashboardData>
       >((currentState, assessment) => {
         currentState[assessment.id] = {
           progress: null,
@@ -275,7 +286,21 @@ function AccountPage() {
       [assessments],
     );
 
-  async function handleCreateAssessment() {
+  async function handleCreateAssessment(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    const cleanedName =
+      assessmentName.trim();
+
+    if (!cleanedName) {
+      setErrorMessage(
+        "Enter a name for the assessment.",
+      );
+      return;
+    }
+
     const accessToken =
       localStorage.getItem(
         "safeplus_access_token",
@@ -294,6 +319,7 @@ function AccountPage() {
 
       const newAssessment =
         await createAssessment(
+          cleanedName,
           accessToken,
         );
 
@@ -303,6 +329,9 @@ function AccountPage() {
           ...currentAssessments,
         ],
       );
+
+      setAssessmentName("");
+      setShowCreateForm(false);
 
       setDashboardData(
         (currentData) => ({
@@ -366,6 +395,72 @@ function AccountPage() {
       );
     } finally {
       setIsCreatingAssessment(false);
+    }
+  }
+
+  async function handleDeleteAssessment(
+    assessment: Assessment,
+  ) {
+    const confirmed = window.confirm(
+      `Delete "${assessment.name}"?\n\nThis will permanently remove its survey links, responses, scores, and AI analysis. This action cannot be undone.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
+
+    if (!accessToken) {
+      navigate("/login", {
+        replace: true,
+      });
+      return;
+    }
+
+    try {
+      setDeletingAssessmentId(
+        assessment.id,
+      );
+      setErrorMessage("");
+
+      await deleteAssessment(
+        assessment.id,
+        accessToken,
+      );
+
+      setAssessments(
+        (currentAssessments) =>
+          currentAssessments.filter(
+            (item) =>
+              item.id !== assessment.id,
+          ),
+      );
+
+      setDashboardData(
+        (currentData) => {
+          const updatedData = {
+            ...currentData,
+          };
+
+          delete updatedData[
+            assessment.id
+          ];
+
+          return updatedData;
+        },
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the assessment.",
+      );
+    } finally {
+      setDeletingAssessmentId(null);
     }
   }
 
@@ -463,16 +558,17 @@ function AccountPage() {
           <div className="mt-8 flex flex-wrap gap-4">
             <button
               type="button"
-              onClick={
-                handleCreateAssessment
-              }
-              disabled={
-                isCreatingAssessment
-              }
-              className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:opacity-60"
+              onClick={() => {
+                setShowCreateForm(
+                  (currentValue) =>
+                    !currentValue,
+                );
+                setErrorMessage("");
+              }}
+              className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white"
             >
-              {isCreatingAssessment
-                ? "Creating assessment..."
+              {showCreateForm
+                ? "Cancel new assessment"
                 : "Start new assessment"}
             </button>
 
@@ -507,6 +603,56 @@ function AccountPage() {
               Log out
             </button>
           </div>
+
+          {showCreateForm && (
+            <form
+              onSubmit={
+                handleCreateAssessment
+              }
+              className="mt-6 rounded-xl border border-cyan-200 bg-cyan-50 p-6"
+            >
+              <label
+                htmlFor="assessment-name"
+                className="block text-sm font-semibold text-slate-900"
+              >
+                Assessment name
+              </label>
+
+              <p className="mt-1 text-sm text-slate-600">
+                Use a clear name that helps
+                identify the assessment later.
+              </p>
+
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <input
+                  id="assessment-name"
+                  type="text"
+                  value={assessmentName}
+                  onChange={(event) =>
+                    setAssessmentName(
+                      event.target.value,
+                    )
+                  }
+                  maxLength={150}
+                  autoFocus
+                  placeholder="Example: 2026 Annual Safety Review"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                />
+
+                <button
+                  type="submit"
+                  disabled={
+                    isCreatingAssessment
+                  }
+                  className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:opacity-60"
+                >
+                  {isCreatingAssessment
+                    ? "Creating..."
+                    : "Create assessment"}
+                </button>
+              </div>
+            </form>
+          )}
         </header>
 
         <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -611,6 +757,10 @@ function AccountPage() {
                       ?.overall_progress_percentage ??
                     0;
 
+                  const isDeleting =
+                    deletingAssessmentId ===
+                    assessment.id;
+
                   return (
                     <article
                       key={assessment.id}
@@ -618,9 +768,15 @@ function AccountPage() {
                     >
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
-                          <p className="text-lg font-bold text-slate-900">
-                            Assessment #
-                            {assessment.id}
+                          <p className="text-xl font-bold text-slate-900">
+                            {assessment.name}
+                          </p>
+
+                          <p className="mt-1 text-sm font-semibold text-cyan-700">
+                            Assessment{" "}
+                            {
+                              assessment.organisation_assessment_number
+                            }
                           </p>
 
                           <p className="mt-1 text-sm text-slate-500">
@@ -764,7 +920,8 @@ function AccountPage() {
                               `/assessments/${assessment.id}`,
                             )
                           }
-                          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                          disabled={isDeleting}
+                          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                         >
                           Setup and survey
                         </button>
@@ -776,7 +933,8 @@ function AccountPage() {
                               `/assessments/${assessment.id}/responses`,
                             )
                           }
-                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+                          disabled={isDeleting}
+                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
                         >
                           View responses
                         </button>
@@ -788,9 +946,25 @@ function AccountPage() {
                               `/assessments/${assessment.id}/results`,
                             )
                           }
-                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+                          disabled={isDeleting}
+                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
                         >
                           View results
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDeleteAssessment(
+                              assessment,
+                            )
+                          }
+                          disabled={isDeleting}
+                          className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          {isDeleting
+                            ? "Deleting..."
+                            : "Delete assessment"}
                         </button>
                       </div>
                     </article>
