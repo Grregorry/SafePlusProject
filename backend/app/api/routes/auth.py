@@ -58,11 +58,14 @@ def register_organisation(
         )
 
     organisation = Organisation(
-        name=normalised_name,
-        email=normalised_email,
-        password_hash=hash_password(registration.password),
-        is_verified=False,
-    )
+    name=normalised_name,
+    category=registration.category,
+    email=normalised_email,
+    password_hash=hash_password(
+        registration.password
+    ),
+    is_verified=False,
+)
 
     database.add(organisation)
 

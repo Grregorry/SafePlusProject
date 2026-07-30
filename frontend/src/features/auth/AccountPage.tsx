@@ -537,16 +537,23 @@ function AccountPage() {
             </div>
 
             <div className="text-sm text-slate-600">
-              <p>
-                {organisation.email}
-              </p>
+            <p>
+              {organisation.email}
+            </p>
 
-              <p className="mt-1 font-semibold">
-                {organisation.is_verified
-                  ? "Verified organisation"
-                  : "Organisation not verified"}
-              </p>
-            </div>
+            <p className="mt-1">
+              Sector:{" "}
+              <span className="font-semibold text-slate-800">
+                {organisation.category}
+              </span>
+            </p>
+
+            <p className="mt-1 font-semibold">
+              {organisation.is_verified
+                ? "Verified organisation"
+                : "Organisation not verified"}
+            </p>
+          </div>
           </div>
 
           {errorMessage && (

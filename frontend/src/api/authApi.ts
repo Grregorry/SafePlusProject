@@ -1,6 +1,19 @@
+export type OrganisationCategory =
+  | "Construction"
+  | "Mining and quarrying"
+  | "Manufacturing"
+  | "Healthcare"
+  | "Transport and logistics"
+  | "Agriculture"
+  | "Retail"
+  | "Hospitality"
+  | "Professional services"
+  | "Other";
+
 export type Organisation = {
   id: number;
   name: string;
+  category: OrganisationCategory;
   email: string;
   is_verified: boolean;
   created_at: string;
@@ -8,6 +21,7 @@ export type Organisation = {
 
 export type RegisterRequest = {
   name: string;
+  category: OrganisationCategory;
   email: string;
   password: string;
 };
@@ -28,11 +42,15 @@ type ApiErrorResponse = {
 };
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_BASE_URL ??
+  "http://127.0.0.1:8000";
 
-async function getErrorMessage(response: Response): Promise<string> {
+async function getErrorMessage(
+  response: Response,
+): Promise<string> {
   try {
-    const error = (await response.json()) as ApiErrorResponse;
+    const error =
+      (await response.json()) as ApiErrorResponse;
 
     if (typeof error.detail === "string") {
       return error.detail;
@@ -47,16 +65,21 @@ async function getErrorMessage(response: Response): Promise<string> {
 export async function registerOrganisation(
   registration: RegisterRequest,
 ): Promise<Organisation> {
-  const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/register`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(registration),
     },
-    body: JSON.stringify(registration),
-  });
+  );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<Organisation>;
@@ -70,16 +93,22 @@ export async function loginOrganisation(
   formData.set("username", login.email);
   formData.set("password", login.password);
 
-  const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/login`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type":
+          "application/x-www-form-urlencoded",
+      },
+      body: formData,
     },
-    body: formData,
-  });
+  );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<TokenResponse>;
@@ -88,14 +117,19 @@ export async function loginOrganisation(
 export async function getCurrentOrganisation(
   accessToken: string,
 ): Promise<Organisation> {
-  const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/me`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
     },
-  });
+  );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new Error(
+      await getErrorMessage(response),
+    );
   }
 
   return response.json() as Promise<Organisation>;
