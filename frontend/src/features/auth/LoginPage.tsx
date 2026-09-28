@@ -22,6 +22,8 @@ function LoginPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [showPasswordResetNotice, setShowPasswordResetNotice] =
+    useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -115,6 +117,22 @@ function LoginPage() {
               required
               className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-3"
             />
+
+            <button
+              type="button"
+              onClick={() => setShowPasswordResetNotice(true)}
+              className="mt-2 text-sm font-semibold text-cyan-700"
+            >
+              Forgot password?
+            </button>
+
+            {showPasswordResetNotice && (
+              <p className="mt-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                Password reset isn't available in this prototype
+                yet. Contact your administrator for a manual
+                reset.
+              </p>
+            )}
           </div>
 
           <button

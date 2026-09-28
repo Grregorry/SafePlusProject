@@ -109,6 +109,18 @@ class Assessment(Base):
                 "ck_assessment_completion_time"
             ),
         ),
+        CheckConstraint(
+            "expected_manual_entries_employee >= 0",
+            name=(
+                "ck_assessment_expected_manual_entries_employee"
+            ),
+        ),
+        CheckConstraint(
+            "expected_manual_entries_manager >= 0",
+            name=(
+                "ck_assessment_expected_manual_entries_manager"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(
@@ -180,6 +192,24 @@ class Assessment(Base):
     ] = mapped_column(
         String(20),
         nullable=True,
+    )
+
+    expected_manual_entries_employee: Mapped[
+        int
+    ] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    expected_manual_entries_manager: Mapped[
+        int
+    ] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
 
     organisation: Mapped[

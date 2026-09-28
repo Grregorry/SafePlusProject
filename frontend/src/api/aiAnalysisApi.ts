@@ -1,3 +1,6 @@
+import { API_BASE_URL } from "./config";
+import { getErrorMessage } from "./errors";
+
 export type SafePlusGuidanceSource = {
   source_id: string;
   title: string;
@@ -53,6 +56,7 @@ export type AIAnalysis = {
   ai_provider: string;
   generated_at: string | null;
   status: string;
+  included_in_report: boolean;
 };
 
 export type AIAnalysisGenerationResult =
@@ -65,31 +69,6 @@ export type AIAnalysisSourcesResult = {
   count: number;
   notice: string;
 };
-
-type ApiErrorResponse = {
-  detail?: string;
-};
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ??
-  "http://127.0.0.1:8000";
-
-async function getErrorMessage(
-  response: Response,
-): Promise<string> {
-  try {
-    const error =
-      (await response.json()) as ApiErrorResponse;
-
-    if (typeof error.detail === "string") {
-      return error.detail;
-    }
-  } catch {
-    // Response did not contain valid JSON.
-  }
-
-  return `Request failed with status ${response.status}.`;
-}
 
 export async function getAIAnalysis(
   assessmentId: number,
@@ -138,6 +117,35 @@ export async function generateAIAnalysis(
   }
 
   return response.json() as Promise<AIAnalysisGenerationResult>;
+}
+
+export async function setAIAnalysisInclusion(
+  assessmentId: number,
+  includedInReport: boolean,
+  accessToken: string,
+): Promise<AIAnalysis> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/ai-analysis/inclusion`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        included_in_report:
+          includedInReport,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  return response.json() as Promise<AIAnalysis>;
 }
 
 export async function getAIAnalysisSources(

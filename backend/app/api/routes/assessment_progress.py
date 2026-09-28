@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter
+from sqlalchemy import func, select
 
 from app.api.dependencies import (
     CurrentOrganisation,
     DatabaseSession,
+    get_owned_assessment,
 )
-from app.models.assessment import Assessment
 from app.models.assessment_question import AssessmentQuestion
+from app.models.manual_response_count import ManualResponseCount
 from app.models.question import Question
 from app.models.response_count import ResponseCount
 from app.schemas.assessment_progress import (
@@ -19,27 +20,6 @@ router = APIRouter(
     prefix="/api/assessments",
     tags=["assessment progress"],
 )
-
-
-def get_owned_assessment(
-    assessment_id: int,
-    organisation_id: int,
-    database: DatabaseSession,
-) -> Assessment:
-    assessment = database.scalar(
-        select(Assessment).where(
-            Assessment.id == assessment_id,
-            Assessment.organisation_id == organisation_id,
-        )
-    )
-
-    if assessment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Assessment not found.",
-        )
-
-    return assessment
 
 
 @router.get(
@@ -80,9 +60,32 @@ def get_assessment_progress(
     employee_complete_count = 0
     manager_complete_count = 0
     fully_complete_count = 0
+    digital_employee_complete_count = 0
+    digital_manager_complete_count = 0
+    manual_employee_complete_count = 0
+    manual_manager_complete_count = 0
+
+    def manual_entries_for_group(
+        assessment_question_id: int,
+        respondent_group: str,
+    ) -> int:
+        return database.scalar(
+            select(
+                func.coalesce(
+                    func.sum(ManualResponseCount.count),
+                    0,
+                )
+            ).where(
+                ManualResponseCount.assessment_question_id
+                == assessment_question_id,
+                ManualResponseCount.respondent_group
+                == respondent_group,
+                ManualResponseCount.response_option != "N/A",
+            )
+        ) or 0
 
     for assessment_question, question in active_question_rows:
-        response_groups = set(
+        digital_response_groups = set(
             database.scalars(
                 select(ResponseCount.respondent_group).where(
                     ResponseCount.assessment_question_id
@@ -93,8 +96,51 @@ def get_assessment_progress(
             ).all()
         )
 
-        employee_complete = "Employee" in response_groups
-        manager_complete = "Senior Manager" in response_groups
+        employee_manual_entries_recorded = (
+            manual_entries_for_group(
+                assessment_question.id,
+                "Employee",
+            )
+        )
+
+        manager_manual_entries_recorded = (
+            manual_entries_for_group(
+                assessment_question.id,
+                "Senior Manager",
+            )
+        )
+
+        employee_digital_present = (
+            "Employee" in digital_response_groups
+        )
+
+        manager_digital_present = (
+            "Senior Manager" in digital_response_groups
+        )
+
+        employee_manual_target_met = (
+            assessment.expected_manual_entries_employee
+            == 0
+            or employee_manual_entries_recorded
+            == assessment.expected_manual_entries_employee
+        )
+
+        manager_manual_target_met = (
+            assessment.expected_manual_entries_manager
+            == 0
+            or manager_manual_entries_recorded
+            == assessment.expected_manual_entries_manager
+        )
+
+        employee_complete = (
+            employee_digital_present
+            or employee_manual_entries_recorded > 0
+        ) and employee_manual_target_met
+
+        manager_complete = (
+            manager_digital_present
+            or manager_manual_entries_recorded > 0
+        ) and manager_manual_target_met
 
         fully_complete = (
             employee_complete and manager_complete
@@ -109,12 +155,30 @@ def get_assessment_progress(
         if fully_complete:
             fully_complete_count += 1
 
+        if employee_digital_present:
+            digital_employee_complete_count += 1
+
+        if manager_digital_present:
+            digital_manager_complete_count += 1
+
+        if employee_manual_entries_recorded > 0:
+            manual_employee_complete_count += 1
+
+        if manager_manual_entries_recorded > 0:
+            manual_manager_complete_count += 1
+
         question_progress.append(
             QuestionProgressResponse(
                 question_id=question.id,
                 question_number=question.question_number,
                 employee_complete=employee_complete,
                 manager_complete=manager_complete,
+                employee_manual_entries_recorded=(
+                    employee_manual_entries_recorded
+                ),
+                manager_manual_entries_recorded=(
+                    manager_manual_entries_recorded
+                ),
                 fully_complete=fully_complete,
             )
         )
@@ -139,5 +203,23 @@ def get_assessment_progress(
         manager_complete_count=manager_complete_count,
         fully_complete_count=fully_complete_count,
         overall_progress_percentage=progress_percentage,
+        expected_manual_entries_employee=(
+            assessment.expected_manual_entries_employee
+        ),
+        expected_manual_entries_manager=(
+            assessment.expected_manual_entries_manager
+        ),
+        digital_employee_complete_count=(
+            digital_employee_complete_count
+        ),
+        digital_manager_complete_count=(
+            digital_manager_complete_count
+        ),
+        manual_employee_complete_count=(
+            manual_employee_complete_count
+        ),
+        manual_manager_complete_count=(
+            manual_manager_complete_count
+        ),
         questions=question_progress,
     )

@@ -14,6 +14,9 @@ from app.models.assessment_question import (
     AssessmentQuestion,
 )
 from app.models.domain_score import DomainScore
+from app.models.manual_response_count import (
+    ManualResponseCount,
+)
 from app.models.question import Question
 from app.models.question_score import QuestionScore
 from app.models.response_count import ResponseCount
@@ -39,34 +42,52 @@ def round_score(
     )
 
 
+def combine_counts_by_option(
+    *count_lists: list[ResponseCount]
+    | list[ManualResponseCount],
+) -> dict[str, int]:
+    combined: dict[str, int] = {}
+
+    for count_list in count_lists:
+        for response_count in count_list:
+            combined[
+                response_count.response_option
+            ] = (
+                combined.get(
+                    response_count.response_option,
+                    0,
+                )
+                + response_count.count
+            )
+
+    return combined
+
+
 def calculate_group_mean(
-    response_counts: list[ResponseCount],
+    counts_by_option: dict[str, int],
 ) -> Decimal | None:
     weighted_total = Decimal("0")
     response_total = 0
 
-    for response_count in response_counts:
-        if (
-            response_count.response_option
-            == "N/A"
-        ):
+    for (
+        response_option,
+        count,
+    ) in counts_by_option.items():
+        if response_option == "N/A":
             continue
 
         score_value = LIKERT_VALUES.get(
-            response_count.response_option
+            response_option
         )
 
         if score_value is None:
             continue
 
         weighted_total += (
-            score_value
-            * response_count.count
+            score_value * count
         )
 
-        response_total += (
-            response_count.count
-        )
+        response_total += count
 
     if response_total == 0:
         return None
@@ -233,7 +254,7 @@ def calculate_assessment_scores(
         if question is None:
             continue
 
-        response_counts = list(
+        digital_counts = list(
             database.scalars(
                 select(ResponseCount).where(
                     ResponseCount
@@ -243,25 +264,47 @@ def calculate_assessment_scores(
             ).all()
         )
 
-        employee_counts = [
-            response_count
-            for response_count
-            in response_counts
-            if (
-                response_count.respondent_group
-                == "Employee"
-            )
-        ]
+        manual_counts = list(
+            database.scalars(
+                select(
+                    ManualResponseCount
+                ).where(
+                    ManualResponseCount
+                    .assessment_question_id
+                    == assessment_question.id
+                )
+            ).all()
+        )
 
-        manager_counts = [
-            response_count
-            for response_count
-            in response_counts
-            if (
-                response_count.respondent_group
+        employee_counts = combine_counts_by_option(
+            [
+                count
+                for count in digital_counts
+                if count.respondent_group
+                == "Employee"
+            ],
+            [
+                count
+                for count in manual_counts
+                if count.respondent_group
+                == "Employee"
+            ],
+        )
+
+        manager_counts = combine_counts_by_option(
+            [
+                count
+                for count in digital_counts
+                if count.respondent_group
                 == "Senior Manager"
-            )
-        ]
+            ],
+            [
+                count
+                for count in manual_counts
+                if count.respondent_group
+                == "Senior Manager"
+            ],
+        )
 
         employee_mean = (
             calculate_group_mean(

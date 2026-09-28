@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useState,
 } from "react";
@@ -10,6 +9,7 @@ import {
   getAssessmentSubmissions,
   type ManagedSubmission,
 } from "../../api/submissionManagementApi";
+import { useConfirm } from "../../components/useConfirm";
 
 type SubmissionManagementPanelProps = {
   assessmentId: number;
@@ -21,6 +21,8 @@ function SubmissionManagementPanel({
   onChanged,
 }: SubmissionManagementPanelProps) {
   const navigate = useNavigate();
+
+  const { confirm, dialog } = useConfirm();
 
   const [
     submissions,
@@ -45,46 +47,61 @@ function SubmissionManagementPanel({
     setSuccessMessage,
   ] = useState("");
 
-  const loadSubmissions =
-    useCallback(async () => {
-      const accessToken =
-        localStorage.getItem(
-          "safeplus_access_token",
-        );
+  // Bumped to reload: the fetch lives in the effect, so state is
+  // only set from its callbacks, never synchronously.
+  const [refreshCount, setRefreshCount] =
+    useState(0);
 
-      if (!accessToken) {
-        navigate("/login", {
-          replace: true,
-        });
-        return;
-      }
+  useEffect(() => {
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
 
-      try {
+    if (!accessToken) {
+      navigate("/login", {
+        replace: true,
+      });
+      return;
+    }
+
+    let cancelled = false;
+
+    getAssessmentSubmissions(
+      assessmentId,
+      accessToken,
+    )
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
         setErrorMessage("");
-
-        const result =
-          await getAssessmentSubmissions(
-            assessmentId,
-            accessToken,
-          );
-
         setSubmissions(
           result.submissions,
         );
-      } catch (error) {
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
         setErrorMessage(
           error instanceof Error
             ? error.message
             : "Unable to load submissions.",
         );
-      } finally {
-        setIsLoading(false);
-      }
-    }, [assessmentId, navigate]);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
 
-  useEffect(() => {
-    void loadSubmissions();
-  }, [loadSubmissions]);
+    return () => {
+      cancelled = true;
+    };
+  }, [assessmentId, navigate, refreshCount]);
 
   async function handleDelete(
     submission: ManagedSubmission,
@@ -95,7 +112,7 @@ function SubmissionManagementPanel({
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = await confirm(
       "Delete this unfinished survey session? Its saved answers will also be deleted.",
     );
 
@@ -133,7 +150,9 @@ function SubmissionManagementPanel({
         result.message,
       );
 
-      await loadSubmissions();
+      setRefreshCount(
+        (count) => count + 1,
+      );
       onChanged?.();
     } catch (error) {
       setErrorMessage(
@@ -147,18 +166,16 @@ function SubmissionManagementPanel({
   }
 
   return (
-    <section className="mt-8 rounded-xl bg-white p-8 shadow">
+    <>
+      {dialog}
+
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-            Survey sessions
-          </p>
-
-          <h2 className="mt-2 text-2xl font-bold text-slate-900">
+          <h2 className="text-xl font-bold text-slate-900">
             Manage submissions
           </h2>
 
-          <p className="mt-2 text-slate-600">
+          <p className="mt-1 text-slate-600">
             Review submitted and unfinished
             respondent sessions.
           </p>
@@ -168,7 +185,9 @@ function SubmissionManagementPanel({
           type="button"
           onClick={() => {
             setIsLoading(true);
-            void loadSubmissions();
+            setRefreshCount(
+              (count) => count + 1,
+            );
           }}
           disabled={isLoading}
           className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
@@ -325,7 +344,7 @@ function SubmissionManagementPanel({
           </table>
         </div>
       )}
-    </section>
+    </>
   );
 }
 

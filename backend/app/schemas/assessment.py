@@ -7,6 +7,7 @@ from pydantic import (
     ConfigDict,
     Field,
     field_validator,
+    model_validator,
 )
 
 
@@ -74,9 +75,34 @@ class AssessmentResponse(BaseModel):
     overall_maturity_label: (
         str | None
     )
+    expected_manual_entries_employee: int
+    expected_manual_entries_manager: int
 
     model_config = ConfigDict(
         from_attributes=True,
+    )
+
+    @model_validator(mode="after")
+    def hide_scores_until_completed(
+        self,
+    ) -> "AssessmentResponse":
+        # A partial score for an open assessment can reveal how the
+        # latest respondent answered, so it is never sent.
+        if self.status != "completed":
+            self.overall_combined_mean = None
+            self.overall_maturity_label = None
+
+        return self
+
+
+class ExpectedManualEntriesUpdate(
+    BaseModel
+):
+    expected_manual_entries_employee: int = Field(
+        ge=0,
+    )
+    expected_manual_entries_manager: int = Field(
+        ge=0,
     )
 
 

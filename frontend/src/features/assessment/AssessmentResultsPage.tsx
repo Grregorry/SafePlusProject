@@ -3,226 +3,67 @@ import {
   useState,
 } from "react";
 import {
+  Link,
   useNavigate,
   useParams,
 } from "react-router-dom";
-
 import {
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
-
-import {
+  type AIAnalysis,
   generateAIAnalysis,
   getAIAnalysis,
-  type AIAnalysis,
-  type SafePlusGuidanceSource,
 } from "../../api/aiAnalysisApi";
 import {
-  calculateAssessmentScores,
-  completeAssessment,
-  downloadAssessmentReport,
-  getAssessment,
   type Assessment,
   type AssessmentCompletionResult,
   type AssessmentScoringResult,
+  type AssessmentSetupQuestion,
+  calculateAssessmentScores,
+  completeAssessment,
+  deleteAssessment,
+  downloadAssessmentReport,
+  downloadBoardReport,
+  downloadBusinessLeaderReport,
+  downloadOperationalManagerReport,
+  getAssessment,
+  getAssessmentQuestions,
+  updateQuestionSelection,
 } from "../../api/assessmentsApi";
-
-function getDomainName(
-  domainId: number,
-): string {
-  if (domainId === 1) {
-    return "Leadership";
-  }
-
-  if (domainId === 2) {
-    return "Worker Engagement";
-  }
-
-  if (domainId === 3) {
-    return "Risk Management";
-  }
-
-  return `Domain ${domainId}`;
-}
-
-function getMaturityClasses(
-  maturityLevel: string,
-): string {
-  if (maturityLevel === "Leading") {
-    return "bg-emerald-100 text-emerald-800";
-  }
-
-  if (maturityLevel === "Performing") {
-    return "bg-amber-100 text-amber-800";
-  }
-
-  return "bg-red-100 text-red-800";
-}
-
-
-
-function isHighOverride(
-  opinionGap: string | number,
-): boolean {
-  return Number(opinionGap) >= 3;
-}
-
-function getQuestionStatusLabel(
-  interventionTier: string,
-  opinionGap: string | number,
-): string {
-  if (isHighOverride(opinionGap)) {
-    return "High Override";
-  }
-
-  return interventionTier;
-}
-
-type QuestionResultFilter =
-  | "All"
-  | "High Override"
-  | "High"
-  | "Medium"
-  | "Low"
-  | "Not flagged";
-
-function getInterventionClasses(
-  interventionTier: string,
-  opinionGap?: string | number,
-): string {
-  if (
-    opinionGap !== undefined &&
-    isHighOverride(opinionGap)
-  ) {
-    return "bg-red-700 text-white";
-  }
-
-  if (interventionTier === "High") {
-    return "bg-red-100 text-red-800";
-  }
-
-  if (interventionTier === "Medium") {
-    return "bg-orange-100 text-orange-800";
-  }
-
-  if (interventionTier === "Low") {
-    return "bg-yellow-100 text-yellow-800";
-  }
-
-  return "bg-slate-100 text-slate-700";
-}
-
-function getUrgencyClasses(
-  urgency: string,
-): string {
-  const normalisedUrgency =
-    urgency.toLowerCase();
-
-  if (
-    normalisedUrgency.includes("high") ||
-    normalisedUrgency.includes("urgent") ||
-    normalisedUrgency.includes("immediate")
-  ) {
-    return "bg-red-100 text-red-800";
-  }
-
-  if (
-    normalisedUrgency.includes("medium") ||
-    normalisedUrgency.includes("moderate")
-  ) {
-    return "bg-orange-100 text-orange-800";
-  }
-
-  return "bg-emerald-100 text-emerald-800";
-}
-
-function formatScore(
-  value: string | number | null,
-): string {
-  if (value === null) {
-    return "Not available";
-  }
-
-  const numericValue = Number(value);
-
-  if (Number.isNaN(numericValue)) {
-    return String(value);
-  }
-
-  return numericValue.toFixed(2);
-}
-
-function getSourceById(
-  sourceId: string,
-  sources: SafePlusGuidanceSource[],
-): SafePlusGuidanceSource | undefined {
-  return sources.find(
-    (source) =>
-      source.source_id === sourceId,
-  );
-}
-
-function SourceLinks({
-  sourceIds,
-  sources,
-}: {
-  sourceIds: string[];
-  sources: SafePlusGuidanceSource[];
-}) {
-  if (sourceIds.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="mt-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        WorkSafe sources
-      </p>
-
-      <div className="mt-2 flex flex-wrap gap-2">
-        {sourceIds.map((sourceId) => {
-          const source = getSourceById(
-            sourceId,
-            sources,
-          );
-
-          if (!source) {
-            return (
-              <span
-                key={sourceId}
-                className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600"
-              >
-                {sourceId}
-              </span>
-            );
-          }
-
-          return (
-            <a
-              key={sourceId}
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800 hover:bg-cyan-100"
-            >
-              {source.title}
-            </a>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+import { getCurrentOrganisation } from "../../api/authApi";
+import { getSubmissionSummary } from "../../api/submissionSummaryApi";
+import { useConfirm } from "../../components/useConfirm";
+import {
+  completeConfirmMessage,
+  deleteConfirmMessage,
+  type EntryTotals,
+  fetchEntryTotals,
+  MINIMUM_RESPONSES,
+  tooFewResponsesMessage,
+} from "./assessmentCompletion";
+import PendingHeader from "./results/PendingHeader";
+import ActionBar from "./results/ActionBar";
+import ResultsHeader from "./results/ResultsHeader";
+import SetupPanel from "./results/SetupPanel";
+import OverviewGrid from "./results/OverviewGrid";
+import QuestionResultsSection from "./results/QuestionResultsSection";
+import AiAnalysisSection from "./results/AiAnalysisSection";
+import {
+  type DomainQuestionGroup,
+  type DomainWorking,
+  getQuestionDomainId,
+  getQuestionStatusLabel,
+  isHighOverride,
+  type Participation,
+  type ProfilePoint,
+  type QuestionResultFilter,
+  type ReportType,
+} from "./results/resultsHelpers";
 
 function AssessmentResultsPage() {
   const navigate = useNavigate();
   const { assessmentId } = useParams();
+
+  const { choose, confirm, dialog } =
+    useConfirm();
 
   const numericAssessmentId =
     Number(assessmentId);
@@ -260,11 +101,6 @@ function AssessmentResultsPage() {
   ] = useState(true);
 
   const [
-    isCalculating,
-    setIsCalculating,
-  ] = useState(false);
-
-  const [
     isCompleting,
     setIsCompleting,
   ] = useState(false);
@@ -283,6 +119,44 @@ function AssessmentResultsPage() {
     analysisMessage,
     setAnalysisMessage,
   ] = useState("");
+
+  // Generation errors are shown in the AI section, next to the button.
+  const [
+    analysisError,
+    setAnalysisError,
+  ] = useState("");
+
+  const [
+    participation,
+    setParticipation,
+  ] = useState<Participation | null>(
+    null,
+  );
+
+  const [
+    organisationName,
+    setOrganisationName,
+  ] = useState("");
+
+  const [
+    selectedOptionalIds,
+    setSelectedOptionalIds,
+  ] = useState<number[]>([]);
+
+  const [
+    isSavingSelection,
+    setIsSavingSelection,
+  ] = useState(false);
+
+  const [
+    selectionMessage,
+    setSelectionMessage,
+  ] = useState("");
+
+  const [
+    entryTotals,
+    setEntryTotals,
+  ] = useState<EntryTotals | null>(null);
 
   const [
     questionResultFilter,
@@ -320,18 +194,176 @@ function AssessmentResultsPage() {
   const roadmap =
     aiAnalysis?.roadmap ?? [];
 
-  const radarData =
-    results?.domain_scores.map(
-      (domainScore) => ({
-        domain: getDomainName(
-          domainScore.domain_id,
+  const scoredQuestions = [
+    ...(results?.question_scores ?? []),
+  ].sort((first, second) =>
+    first.question_number.localeCompare(
+      second.question_number,
+      undefined,
+      { numeric: true },
+    ),
+  );
+
+  // Split questions are left out: their combined mean is hidden
+  // because it would mask opposing perceptions.
+  const comparableScores = scoredQuestions
+    .filter(
+      (questionScore) =>
+        !isHighOverride(
+          questionScore.opinion_gap,
         ),
-        score: Number(
+    )
+    .map((questionScore) =>
+      Number(questionScore.combined_mean),
+    );
+
+  const lowestScore =
+    comparableScores.length > 0
+      ? Math.min(...comparableScores)
+      : null;
+
+  const lowestQuestionIds = new Set(
+    scoredQuestions
+      .filter(
+        (questionScore) =>
+          !isHighOverride(
+            questionScore.opinion_gap,
+          ) &&
+          Number(
+            questionScore.combined_mean,
+          ) === lowestScore,
+      )
+      .map(
+        (questionScore) =>
+          questionScore.question_id,
+      ),
+  );
+
+  const profilePoints: ProfilePoint[] =
+    scoredQuestions.map((questionScore) => ({
+      questionId: questionScore.question_id,
+      questionNumber:
+        questionScore.question_number,
+      domainId: getQuestionDomainId(
+        questionScore.question_number,
+      ),
+      score: Number(
+        questionScore.combined_mean,
+      ),
+      employeeMean: Number(
+        questionScore.employee_mean,
+      ),
+      managerMean: Number(
+        questionScore.manager_mean,
+      ),
+      opinionGap: Number(
+        questionScore.opinion_gap,
+      ),
+      isSplit: isHighOverride(
+        questionScore.opinion_gap,
+      ),
+      isLowest: lowestQuestionIds.has(
+        questionScore.question_id,
+      ),
+    }));
+
+  const sortedDomainScores = [
+    ...(results?.domain_scores ?? []),
+  ].sort(
+    (first, second) =>
+      first.domain_id - second.domain_id,
+  );
+
+  const domainWorkings: DomainWorking[] =
+    sortedDomainScores.map((domainScore) => {
+      const domainQuestions =
+        scoredQuestions.filter(
+          (questionScore) =>
+            getQuestionDomainId(
+              questionScore.question_number,
+            ) === domainScore.domain_id,
+        );
+
+      return {
+        domainId: domainScore.domain_id,
+        count: domainQuestions.length,
+        total: domainQuestions.reduce(
+          (total, questionScore) =>
+            total +
+            Number(
+              questionScore.combined_mean,
+            ),
+          0,
+        ),
+        mean: Number(
           domainScore.combined_mean,
         ),
-        fullMark: 5,
+      };
+    });
+
+  const overallScore =
+    results &&
+    results.overall_combined_mean !== null
+      ? Number(results.overall_combined_mean)
+      : null;
+
+  // Questions grouped by domain, in question-number order, for the
+  // open assessment. Required questions are always included; optional
+  // (situation-dependent) ones can be ticked in or out.
+  const domainQuestionGroups: DomainQuestionGroup[] = (() => {
+    if (!participation) {
+      return [];
+    }
+
+    const groups = new Map<
+      string,
+      AssessmentSetupQuestion[]
+    >();
+
+    [...participation.questions]
+      .sort((first, second) =>
+        first.question_number.localeCompare(
+          second.question_number,
+          undefined,
+          { numeric: true },
+        ),
+      )
+      .forEach((question) => {
+        const list =
+          groups.get(question.domain_name) ??
+          [];
+
+        list.push(question);
+        groups.set(question.domain_name, list);
+      });
+
+    return [...groups.entries()].map(
+      ([name, questions]) => ({
+        name,
+        questions,
       }),
-    ) ?? [];
+    );
+  })();
+
+  const savedOptionalIds = participation
+    ? participation.questions
+        .filter(
+          (question) =>
+            question.is_situation_dependent &&
+            question.is_active,
+        )
+        .map((question) => question.question_id)
+    : [];
+
+  const hasSelectionChanges =
+    savedOptionalIds.length !==
+      selectedOptionalIds.length ||
+    savedOptionalIds.some(
+      (questionId) =>
+        !selectedOptionalIds.includes(
+          questionId,
+        ),
+    );
 
   const filteredQuestionScores =
     results?.question_scores.filter(
@@ -351,10 +383,86 @@ function AssessmentResultsPage() {
       },
     ) ?? [];
 
+  const reportOptions: {
+    type: ReportType;
+    label: string;
+  }[] = [
+    { type: "full", label: "Full report" },
+    {
+      type: "business-leader",
+      label: "Business leader",
+    },
+    { type: "board", label: "Board" },
+    {
+      type: "operational-manager",
+      label: "Operational manager",
+    },
+  ];
+
+  // Which download is being prepared, e.g. "board-ai", so only that
+  // button shows "Preparing...".
   const [
-    isDownloadingReport,
-    setIsDownloadingReport,
+    downloadingReport,
+    setDownloadingReport,
+  ] = useState<string | null>(null);
+
+  const [
+    isReportMenuOpen,
+    setIsReportMenuOpen,
   ] = useState(false);
+
+  // Links to parts of the AI analysis appear in the navigation bar
+  // once the user jumps to it.
+  const [showAiLinks, setShowAiLinks] =
+    useState(false);
+
+  // Close the download menu on Escape or a click outside it.
+  useEffect(() => {
+    if (!isReportMenuOpen) {
+      return;
+    }
+
+    function handleKeyDown(
+      event: KeyboardEvent,
+    ) {
+      if (event.key === "Escape") {
+        setIsReportMenuOpen(false);
+      }
+    }
+
+    function handlePointerDown(
+      event: MouseEvent,
+    ) {
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest(
+          "[data-report-menu]",
+        )
+      ) {
+        setIsReportMenuOpen(false);
+      }
+    }
+
+    document.addEventListener(
+      "keydown",
+      handleKeyDown,
+    );
+    document.addEventListener(
+      "mousedown",
+      handlePointerDown,
+    );
+
+    return () => {
+      document.removeEventListener(
+        "keydown",
+        handleKeyDown,
+      );
+      document.removeEventListener(
+        "mousedown",
+        handlePointerDown,
+      );
+    };
+  }, [isReportMenuOpen]);
 
   useEffect(() => {
     async function loadPage() {
@@ -388,31 +496,83 @@ function AssessmentResultsPage() {
       try {
         setErrorMessage("");
 
-        const [
-          assessmentResult,
-          scoringResult,
-          savedAnalysis,
-        ] = await Promise.all([
-          getAssessment(
+        const assessmentResult =
+          await getAssessment(
             numericAssessmentId,
             accessToken,
-          ),
-          calculateAssessmentScores(
-            numericAssessmentId,
-            accessToken,
-          ),
-          getAIAnalysis(
-            numericAssessmentId,
-            accessToken,
-          ),
-        ]);
+          );
 
-        setAssessment(
-          assessmentResult,
-        );
+        setAssessment(assessmentResult);
 
-        setResults(scoringResult);
-        setAIAnalysis(savedAnalysis);
+        if (
+          assessmentResult.status ===
+          "completed"
+        ) {
+          const [
+            scoringResult,
+            savedAnalysis,
+            totals,
+          ] = await Promise.all([
+            calculateAssessmentScores(
+              numericAssessmentId,
+              accessToken,
+            ),
+            getAIAnalysis(
+              numericAssessmentId,
+              accessToken,
+            ),
+            fetchEntryTotals(
+              numericAssessmentId,
+              accessToken,
+            ),
+          ]);
+
+          setResults(scoringResult);
+          setAIAnalysis(savedAnalysis);
+          setEntryTotals(totals);
+        } else {
+          // Open assessments show participation only. Scores are
+          // never requested, so none reach the browser.
+          const [
+            organisation,
+            summary,
+            questions,
+          ] = await Promise.all([
+            getCurrentOrganisation(
+              accessToken,
+            ),
+            getSubmissionSummary(
+              numericAssessmentId,
+              accessToken,
+            ),
+            getAssessmentQuestions(
+              numericAssessmentId,
+              accessToken,
+            ),
+          ]);
+
+          setOrganisationName(
+            organisation.name,
+          );
+
+          setParticipation({
+            summary,
+            questions,
+          });
+
+          setSelectedOptionalIds(
+            questions
+              .filter(
+                (question) =>
+                  question.is_situation_dependent &&
+                  question.is_active,
+              )
+              .map(
+                (question) =>
+                  question.question_id,
+              ),
+          );
+        }
       } catch (error) {
         setErrorMessage(
           error instanceof Error
@@ -430,7 +590,21 @@ function AssessmentResultsPage() {
     numericAssessmentId,
   ]);
 
-  async function handleCalculateScores() {
+  function toggleOptionalQuestion(
+    questionId: number,
+  ) {
+    setSelectionMessage("");
+
+    setSelectedOptionalIds((currentIds) =>
+      currentIds.includes(questionId)
+        ? currentIds.filter(
+            (id) => id !== questionId,
+          )
+        : [...currentIds, questionId],
+    );
+  }
+
+  async function handleSaveQuestionSelection() {
     const accessToken =
       localStorage.getItem(
         "safeplus_access_token",
@@ -444,36 +618,127 @@ function AssessmentResultsPage() {
       return;
     }
 
+    if (!participation) {
+      return;
+    }
+
+    const removedCount = savedOptionalIds.filter(
+      (questionId) =>
+        !selectedOptionalIds.includes(
+          questionId,
+        ),
+    ).length;
+
+    if (
+      removedCount > 0 &&
+      participation.summary.submitted_total > 0
+    ) {
+      const confirmed = await confirm(
+        `Remove ${removedCount} optional ${
+          removedCount === 1
+            ? "question"
+            : "questions"
+        }?\n\nAny responses already given to ${
+          removedCount === 1 ? "it" : "them"
+        } will be deleted.`,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
     try {
-      setIsCalculating(true);
+      setIsSavingSelection(true);
       setErrorMessage("");
-      setAnalysisMessage("");
+      setSelectionMessage("");
 
-      const scoringResult =
-        await calculateAssessmentScores(
+      const updatedQuestions =
+        await updateQuestionSelection(
           numericAssessmentId,
+          selectedOptionalIds,
           accessToken,
         );
 
-      setResults(scoringResult);
+      setParticipation((current) =>
+        current
+          ? {
+              ...current,
+              questions: updatedQuestions,
+            }
+          : current,
+      );
 
-      const updatedAssessment =
-        await getAssessment(
-          numericAssessmentId,
-          accessToken,
-        );
+      setSelectedOptionalIds(
+        updatedQuestions
+          .filter(
+            (question) =>
+              question.is_situation_dependent &&
+              question.is_active,
+          )
+          .map(
+            (question) =>
+              question.question_id,
+          ),
+      );
 
-      setAssessment(
-        updatedAssessment,
+      setSelectionMessage(
+        "Question selection saved.",
       );
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Unable to calculate assessment scores.",
+          : "Unable to save the question selection.",
       );
     } finally {
-      setIsCalculating(false);
+      setIsSavingSelection(false);
+    }
+  }
+
+  // Offered when an assessment has too few responses to complete.
+  async function handleDeleteAssessment() {
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
+
+    if (!accessToken) {
+      navigate("/login", {
+        replace: true,
+      });
+
+      return;
+    }
+
+    const confirmed = await confirm(
+      deleteConfirmMessage(assessment?.name),
+      {
+        confirmLabel: "Delete",
+      },
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setErrorMessage("");
+
+      await deleteAssessment(
+        numericAssessmentId,
+        accessToken,
+      );
+
+      navigate("/account", {
+        replace: true,
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the assessment.",
+      );
     }
   }
 
@@ -491,8 +756,47 @@ function AssessmentResultsPage() {
       return;
     }
 
-    const confirmed = window.confirm(
-      "Complete this assessment? Responses and question selection cannot be edited afterward.",
+    let totals: EntryTotals;
+
+    try {
+      setErrorMessage("");
+
+      totals = await fetchEntryTotals(
+        numericAssessmentId,
+        accessToken,
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to check how many responses this assessment has.",
+      );
+
+      return;
+    }
+
+    const responseTotal =
+      totals.online + totals.paper;
+
+    if (responseTotal < MINIMUM_RESPONSES) {
+      const choice = await choose(
+        tooFewResponsesMessage(totals),
+        {
+          confirmLabel: "OK",
+          showCancel: false,
+          extraLabel: "Delete assessment",
+        },
+      );
+
+      if (choice === "extra") {
+        await handleDeleteAssessment();
+      }
+
+      return;
+    }
+
+    const confirmed = await confirm(
+      completeConfirmMessage(totals),
     );
 
     if (!confirmed) {
@@ -531,6 +835,13 @@ function AssessmentResultsPage() {
       setAssessment(
         updatedAssessment,
       );
+
+      setEntryTotals(
+        await fetchEntryTotals(
+          numericAssessmentId,
+          accessToken,
+        ),
+      );
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -564,7 +875,7 @@ function AssessmentResultsPage() {
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = await confirm(
       aiAnalysis
         ? "Regenerate the AI analysis? The existing saved analysis will be replaced."
         : "Generate an AI analysis using the assessment results and curated WorkSafe SafePlus guidance?",
@@ -578,6 +889,7 @@ function AssessmentResultsPage() {
       setIsGeneratingAnalysis(true);
       setErrorMessage("");
       setAnalysisMessage("");
+      setAnalysisError("");
 
       const generatedAnalysis =
         await generateAIAnalysis(
@@ -593,7 +905,7 @@ function AssessmentResultsPage() {
         generatedAnalysis.message,
       );
     } catch (error) {
-      setErrorMessage(
+      setAnalysisError(
         error instanceof Error
           ? error.message
           : "Unable to generate AI analysis.",
@@ -603,7 +915,10 @@ function AssessmentResultsPage() {
     }
   }
 
-  async function handleDownloadReport() {
+  async function handleDownloadReport(
+    reportType: ReportType,
+    includeAi: boolean,
+  ) {
     const accessToken =
       localStorage.getItem(
         "safeplus_access_token",
@@ -617,23 +932,36 @@ function AssessmentResultsPage() {
       return;
     }
 
-    if (!isAssessmentCompleted) {
-      setErrorMessage(
-        "Complete the assessment before downloading the report.",
-      );
-
-      return;
-    }
+    const downloadByType: Record<
+      ReportType,
+      (
+        assessmentId: number,
+        includeAi: boolean,
+        accessToken: string,
+      ) => Promise<void>
+    > = {
+      full: downloadAssessmentReport,
+      "business-leader":
+        downloadBusinessLeaderReport,
+      board: downloadBoardReport,
+      "operational-manager":
+        downloadOperationalManagerReport,
+    };
 
     try {
-      setIsDownloadingReport(true);
+      setDownloadingReport(
+        `${reportType}-${includeAi ? "ai" : "review"}`,
+      );
       setErrorMessage("");
       setAnalysisMessage("");
 
-      await downloadAssessmentReport(
+      await downloadByType[reportType](
         numericAssessmentId,
+        includeAi,
         accessToken,
       );
+
+      setIsReportMenuOpen(false);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -641,13 +969,13 @@ function AssessmentResultsPage() {
           : "Unable to download the PDF report.",
       );
     } finally {
-      setIsDownloadingReport(false);
+      setDownloadingReport(null);
     }
   }
 
   if (isLoadingPage) {
     return (
-      <main className="min-h-screen bg-slate-100 p-8">
+      <main>
         <p className="text-slate-700">
           Loading assessment results...
         </p>
@@ -655,1140 +983,144 @@ function AssessmentResultsPage() {
     );
   }
 
+  // Without the assessment we can't tell whether it is open or closed,
+  // so show the reason rather than guessing a layout.
+  if (!assessment) {
+    return (
+      <main>
+        <section className="mx-auto max-w-3xl rounded-xl bg-white p-8 shadow">
+          <h1 className="text-2xl font-bold text-slate-900">
+            Assessment unavailable
+          </h1>
+
+          <p className="mt-3 text-slate-700">
+            {errorMessage ||
+              "This assessment could not be loaded."}
+          </p>
+
+          <Link
+            to="/account"
+            className="mt-6 inline-block font-semibold text-cyan-700 underline hover:text-cyan-900"
+          >
+            Back to dashboard
+          </Link>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-slate-100 px-6 py-12">
-      <section className="mx-auto max-w-6xl">
-        <header className="rounded-xl bg-white p-8 shadow">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-                {assessment
-                  ? `Assessment ${assessment.organisation_assessment_number}`
-                  : `Assessment ${numericAssessmentId}`}
-              </p>
+    <main>
+      {dialog}
 
-              <h1 className="mt-2 text-3xl font-bold text-slate-900">
-                {assessment?.name ??
-                  "Assessment results"}
-              </h1>
+      <section>
+        {!isAssessmentCompleted && (
+          <PendingHeader
+            assessment={assessment}
+            errorMessage={errorMessage}
+            handleCompleteAssessment={handleCompleteAssessment}
+            isCompleting={isCompleting}
+            numericAssessmentId={numericAssessmentId}
+            organisationName={organisationName}
+          />
+        )}
 
-              <p className="mt-3 max-w-3xl text-slate-600">
-                Review calculated SafePlus
-                scores and generate a
-                source-grounded AI analysis
-                using official WorkSafe
-                SafePlus guidance.
-              </p>
-            </div>
+        {/* Stays at the top of the content area while scrolling, beside
+            the sidebar whether it is expanded or collapsed. */}
+        {isAssessmentCompleted && (
+          <ActionBar
+            aiAnalysis={aiAnalysis}
+            assessment={assessment}
+            downloadingReport={downloadingReport}
+            errorMessage={errorMessage}
+            handleDownloadReport={handleDownloadReport}
+            isReportMenuOpen={isReportMenuOpen}
+            reportOptions={reportOptions}
+            setIsReportMenuOpen={setIsReportMenuOpen}
+            setShowAiLinks={setShowAiLinks}
+            showAiLinks={showAiLinks}
+          />
+        )}
 
-            {assessment && (
-              <span
-                className={`rounded-full px-3 py-1 text-sm font-semibold ${
-                  isAssessmentCompleted
-                    ? "bg-emerald-100 text-emerald-800"
-                    : "bg-amber-100 text-amber-800"
-                }`}
-              >
-                {isAssessmentCompleted
-                  ? "Completed"
-                  : assessment.status.replace(
-                      "_",
-                      " ",
-                    )}
-              </span>
-            )}
-          </div>
+        {isAssessmentCompleted && (
+          <ResultsHeader
+            assessment={assessment}
+            completionResult={completionResult}
+            entryTotals={entryTotals}
+            errorMessage={errorMessage}
+          />
+        )}
 
-          <div className="mt-6 flex flex-wrap gap-4">
-            <button
-              type="button"
-              onClick={
-                handleCalculateScores
-              }
-              disabled={
-                isCalculating ||
-                isCompleting ||
-                isGeneratingAnalysis
-              }
-              className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isCalculating
-                ? "Calculating scores..."
-                : results
-                  ? "Recalculate scores"
-                  : "Calculate scores"}
-            </button>
-
-            <button
-              type="button"
-              onClick={
-                handleCompleteAssessment
-              }
-              disabled={
-                isAssessmentCompleted ||
-                isCompleting ||
-                isCalculating ||
-                isGeneratingAnalysis
-              }
-              className="rounded-lg bg-emerald-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isCompleting
-                ? "Completing assessment..."
-                : isAssessmentCompleted
-                  ? "Assessment completed"
-                  : "Complete assessment"}
-            </button>
-
-            <button
-              type="button"
-              onClick={
-                handleGenerateAIAnalysis
-              }
-              disabled={
-                !isAssessmentCompleted ||
-                isGeneratingAnalysis ||
-                isCompleting ||
-                isCalculating
-              }
-              className="rounded-lg bg-violet-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isGeneratingAnalysis
-                ? "Generating AI analysis..."
-                : aiAnalysis
-                  ? "Regenerate AI analysis"
-                  : "Generate AI analysis"}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDownloadReport}
-              disabled={
-                !isAssessmentCompleted ||
-                isDownloadingReport ||
-                isCalculating ||
-                isCompleting ||
-                isGeneratingAnalysis
-              }
-              className="rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isDownloadingReport
-                ? "Preparing PDF..."
-                : "Download PDF report"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                navigate(
-                  `/assessments/${numericAssessmentId}/responses`,
-                )
-              }
-              disabled={
-                isAssessmentCompleted
-              }
-              className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Enter responses
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/account")
-              }
-              className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700"
-            >
-              Return to account
-            </button>
-          </div>
-
-          {!isAssessmentCompleted && (
-            <div className="mt-6 rounded-lg bg-violet-50 p-4 text-sm text-violet-800">
-              Complete the assessment before
-              generating the WorkSafe-grounded
-              AI analysis.
-            </div>
-          )}
-
-          {errorMessage && (
-            <div className="mt-6 rounded-lg bg-red-50 p-4 text-red-700">
-              {errorMessage}
-            </div>
-          )}
-
-          {analysisMessage && (
-            <div className="mt-6 rounded-lg bg-emerald-50 p-4 text-emerald-800">
-              {analysisMessage}
-            </div>
-          )}
-
-          {completionResult && (
-            <div className="mt-6 rounded-lg bg-emerald-50 p-4 text-emerald-800">
-              <p className="font-semibold">
-                Assessment completed
-                successfully.
-              </p>
-
-              <p className="mt-1 text-sm">
-                Final score:{" "}
-                {formatScore(
-                  completionResult
-                    .overall_combined_mean,
-                )}{" "}
-                ·{" "}
-                {
-                  completionResult
-                    .overall_maturity_label
-                }
-              </p>
-
-              <p className="mt-1 text-sm">
-                Questions scored:{" "}
-                {
-                  completionResult
-                    .questions_scored
-                }
-              </p>
-
-              <p className="mt-1 text-sm">
-                Completed:{" "}
-                {new Date(
-                  completionResult.completed_at,
-                ).toLocaleString()}
-              </p>
-            </div>
-          )}
-        </header>
-
-        {!results ? (
+        {!isAssessmentCompleted ? (
+          <>
+            <SetupPanel
+              domainQuestionGroups={domainQuestionGroups}
+              handleSaveQuestionSelection={handleSaveQuestionSelection}
+              hasSelectionChanges={hasSelectionChanges}
+              isSavingSelection={isSavingSelection}
+              participation={participation}
+              selectedOptionalIds={selectedOptionalIds}
+              selectionMessage={selectionMessage}
+              toggleOptionalQuestion={toggleOptionalQuestion}
+            />
+          </>
+        ) : !results ? (
           <section className="mt-8 rounded-xl bg-white p-8 text-center shadow">
             <h2 className="text-xl font-bold text-slate-900">
-              Results have not been
-              calculated
+              Results are not available
             </h2>
 
             <p className="mt-2 text-slate-600">
-              Click Calculate scores to
-              generate the available
-              assessment results.
+              The scores for this assessment
+              could not be loaded. Refresh the
+              page to try again.
             </p>
           </section>
         ) : (
           <>
-            <section className="mt-8 grid gap-6 md:grid-cols-3">
-              <article className="rounded-xl bg-white p-6 shadow">
-                <p className="text-sm font-semibold text-slate-500">
-                  Questions scored
-                </p>
+            {/* Left: question profile. Right: overall result above
+                domain scores, which fills the rest of the column. */}
+            <OverviewGrid
+              lowestQuestionIds={lowestQuestionIds}
+              overallScore={overallScore}
+              profilePoints={profilePoints}
+              results={results}
+              scoredQuestions={scoredQuestions}
+              sortedDomainScores={sortedDomainScores}
+            />
 
-                <p className="mt-2 text-4xl font-bold text-slate-900">
-                  {
-                    results.questions_scored
-                  }
-                </p>
-              </article>
-
-              <article className="rounded-xl bg-white p-6 shadow">
-                <p className="text-sm font-semibold text-slate-500">
-                  Overall combined mean
-                </p>
-
-                <p className="mt-2 text-4xl font-bold text-slate-900">
-                  {formatScore(
-                    results
-                      .overall_combined_mean,
-                  )}
-                </p>
-              </article>
-
-              <article className="rounded-xl bg-white p-6 shadow">
-                <p className="text-sm font-semibold text-slate-500">
-                  Overall maturity
-                </p>
-
-                {results
-                  .overall_maturity_label ? (
-                  <span
-                    className={`mt-3 inline-block rounded-full px-3 py-1 text-sm font-semibold ${getMaturityClasses(
-                      results
-                        .overall_maturity_label,
-                    )}`}
-                  >
-                    {
-                      results
-                        .overall_maturity_label
-                    }
-                  </span>
-                ) : (
-                  <p className="mt-2 text-slate-600">
-                    Not available yet
-                  </p>
-                )}
-              </article>
-            </section>
-
-            <section className="mt-8 rounded-xl bg-white p-8 shadow">
-              <h2 className="text-2xl font-bold text-slate-900">
-                Domain scores
-              </h2>
-
-              {results.domain_scores
-                .length === 0 ? (
-                <p className="mt-4 text-slate-600">
-                  No domain scores are
-                  available yet.
-                </p>
-              ) : (
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
-                  {results.domain_scores.map(
-                    (domainScore) => (
-                      <article
-                        key={
-                          domainScore.domain_id
-                        }
-                        className="rounded-lg border border-slate-200 p-5"
-                      >
-                        <h3 className="font-bold text-slate-900">
-                          {getDomainName(
-                            domainScore.domain_id,
-                          )}
-                        </h3>
-
-                        <p className="mt-4 text-sm text-slate-500">
-                          Combined mean
-                        </p>
-
-                        <p className="mt-1 text-3xl font-bold text-slate-900">
-                          {formatScore(
-                            domainScore
-                              .combined_mean,
-                          )}
-                        </p>
-
-                        <span
-                          className={`mt-4 inline-block rounded-full px-3 py-1 text-xs font-semibold ${getMaturityClasses(
-                            domainScore
-                              .maturity_level,
-                          )}`}
-                        >
-                          {
-                            domainScore
-                              .maturity_level
-                          }
-                        </span>
-                      </article>
-                    ),
-                  )}
-                </div>
-              )}
-            </section>
-
-            <section className="mt-8 rounded-xl bg-white p-8 shadow">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-slate-900">
-                    SafePlus domain profile
-                  </h2>
-
-                  <p className="mt-2 max-w-3xl text-slate-600">
-                    The radar chart compares the
-                    combined score for Leadership,
-                    Worker Engagement, and Risk
-                    Management on the 1 to 5
-                    SafePlus scale.
-                  </p>
-                </div>
-
-                <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  <p>
-                    1 = lower maturity
-                  </p>
-
-                  <p className="mt-1">
-                    5 = higher maturity
-                  </p>
-                </div>
-              </div>
-
-              {radarData.length === 0 ? (
-                <p className="mt-6 text-slate-600">
-                  No domain data is available
-                  for the radar chart.
-                </p>
-              ) : (
-                <div className="mt-6 h-[420px] w-full">
-                  <ResponsiveContainer
-                    width="100%"
-                    height="100%"
-                  >
-                    <RadarChart
-                      data={radarData}
-                      outerRadius="72%"
-                    >
-                      <PolarGrid />
-
-                      <PolarAngleAxis
-                        dataKey="domain"
-                        tick={{
-                          fill: "#334155",
-                          fontSize: 13,
-                        }}
-                      />
-
-                      <PolarRadiusAxis
-                        angle={90}
-                        domain={[0, 5]}
-                        tickCount={6}
-                        allowDecimals={false}
-                      />
-
-                      <Tooltip
-                        formatter={(value) => [
-                          Number(value).toFixed(2),
-                          "Domain score",
-                        ]}
-                      />
-
-                      <Radar
-                        name="Domain score"
-                        dataKey="score"
-                        stroke="#0e7490"
-                        fill="#0891b2"
-                        fillOpacity={0.3}
-                      />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </section>
-
-            <section className="mt-8 rounded-xl bg-white p-8 shadow">
-              <h2 className="text-2xl font-bold text-slate-900">
-                Question results
-              </h2>
-
-              <p className="mt-2 max-w-3xl text-slate-600">
-                Compare Employee and Senior
-                Manager perceptions directly.
-                Combined means are shown when
-                the groups are reasonably aligned.
-                When the opinion gap is 3.00
-                points or greater, the combined
-                mean is hidden because it could
-                mask opposing perceptions.
-              </p>
-
-              <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-                <div>
-                  <label
-                    htmlFor="question-result-filter"
-                    className="block text-sm font-semibold text-slate-700"
-                  >
-                    Filter by intervention tier
-                  </label>
-
-                  <select
-                    id="question-result-filter"
-                    value={questionResultFilter}
-                    onChange={(event) =>
-                      setQuestionResultFilter(
-                        event.target
-                          .value as QuestionResultFilter,
-                      )
-                    }
-                    className="mt-2 min-w-56 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-slate-900 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-100"
-                  >
-                    <option value="All">
-                      Show all
-                    </option>
-                    <option value="High Override">
-                      High Override
-                    </option>
-                    <option value="High">
-                      High
-                    </option>
-                    <option value="Medium">
-                      Medium
-                    </option>
-                    <option value="Low">
-                      Low
-                    </option>
-                    <option value="Not flagged">
-                      Not flagged
-                    </option>
-                  </select>
-                </div>
-
-                <p className="text-sm text-slate-500">
-                  Showing{" "}
-                  <span className="font-semibold text-slate-700">
-                    {filteredQuestionScores.length}
-                  </span>{" "}
-                  of{" "}
-                  <span className="font-semibold text-slate-700">
-                    {
-                      results.question_scores
-                        .length
-                    }
-                  </span>{" "}
-                  questions
-                </p>
-              </div>
-
-              {results.question_scores
-                .length === 0 ? (
-                <p className="mt-6 text-slate-600">
-                  No questions could be
-                  scored yet.
-                </p>
-              ) : filteredQuestionScores.length ===
-                0 ? (
-                <div className="mt-6 rounded-lg border border-dashed border-slate-300 p-6 text-center">
-                  <p className="font-semibold text-slate-900">
-                    No questions match this filter
-                  </p>
-
-                  <p className="mt-2 text-sm text-slate-600">
-                    Choose another intervention
-                    tier or select Show all.
-                  </p>
-                </div>
-              ) : (
-                <div className="mt-6 space-y-4">
-                  {filteredQuestionScores.map(
-                    (questionScore) => (
-                      <article
-                        key={
-                          questionScore.question_id
-                        }
-                        className="rounded-lg border border-slate-200 p-5"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-4">
-                          <div>
-                            <h3 className="font-bold text-slate-900">
-                              Question{" "}
-                              {
-                                questionScore
-                                  .question_number
-                              }
-                            </h3>
-
-                            <p className="mt-1 text-sm text-slate-500">
-                              Question ID{" "}
-                              {
-                                questionScore
-                                  .question_id
-                              }
-                            </p>
-                          </div>
-
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getInterventionClasses(
-                              questionScore
-                                .intervention_tier,
-                              questionScore
-                                .opinion_gap,
-                            )}`}
-                          >
-                            {getQuestionStatusLabel(
-                              questionScore
-                                .intervention_tier,
-                              questionScore
-                                .opinion_gap,
-                            )}
-                          </span>
-                        </div>
-
-                        <div
-                            className={`mt-5 grid gap-4 ${
-                              isHighOverride(
-                                questionScore.opinion_gap,
-                              )
-                                ? "sm:grid-cols-3"
-                                : "sm:grid-cols-4"
-                            }`}
-                          >
-                            <div>
-                              <p className="text-sm text-slate-500">
-                                Employee mean
-                              </p>
-
-                              <p className="mt-1 text-xl font-bold text-slate-900">
-                                {formatScore(
-                                  questionScore.employee_mean,
-                                )}
-                              </p>
-                            </div>
-
-                            <div>
-                              <p className="text-sm text-slate-500">
-                                Senior Manager mean
-                              </p>
-
-                              <p className="mt-1 text-xl font-bold text-slate-900">
-                                {formatScore(
-                                  questionScore.manager_mean,
-                                )}
-                              </p>
-                            </div>
-
-                            {!isHighOverride(
-                              questionScore.opinion_gap,
-                            ) && (
-                              <div>
-                                <p className="text-sm text-slate-500">
-                                  Combined mean
-                                </p>
-
-                                <p className="mt-1 text-xl font-bold text-slate-900">
-                                  {formatScore(
-                                    questionScore.combined_mean,
-                                  )}
-                                </p>
-                              </div>
-                            )}
-
-                            <div>
-                              <p className="text-sm text-slate-500">
-                                Opinion gap
-                              </p>
-
-                              <p
-                                className={`mt-1 text-xl font-bold ${
-                                  isHighOverride(
-                                    questionScore.opinion_gap,
-                                  )
-                                    ? "text-red-700"
-                                    : "text-slate-900"
-                                }`}
-                              >
-                                {formatScore(
-                                  questionScore.opinion_gap,
-                                )}
-                              </p>
-                            </div>
-                          </div>
-
-                        {isHighOverride(
-                          questionScore
-                            .opinion_gap,
-                        ) && (
-                          <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4">
-                            <p className="font-semibold text-red-900">
-                              Extreme perception
-                              difference
-                            </p>
-
-                            <p className="mt-1 text-sm leading-6 text-red-800">
-                              The Employee and
-                              Senior Manager scores
-                              differ by 3.00 points
-                              or more. The combined
-                              average is not shown
-                              because it could hide
-                              the opposing
-                              perceptions.
-                            </p>
-                          </div>
-                        )}
-                      </article>
-                    ),
-                  )}
-                </div>
-              )}
-            </section>
+            <QuestionResultsSection
+              domainWorkings={domainWorkings}
+              filteredQuestionScores={filteredQuestionScores}
+              lowestQuestionIds={lowestQuestionIds}
+              overallScore={overallScore}
+              questionResultFilter={questionResultFilter}
+              results={results}
+              setQuestionResultFilter={setQuestionResultFilter}
+            />
           </>
         )}
 
-        <section className="mt-8 rounded-xl bg-white p-8 shadow">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-violet-700">
-                Gemini analysis
-              </p>
+        {/* AI content stays visually separate from calculated
+            results and only reaches a report when a person includes it. */}
+        {isAssessmentCompleted && (
+          <AiAnalysisSection
+            aiAnalysis={aiAnalysis}
+            aiDomainSummaries={aiDomainSummaries}
+            analysisError={analysisError}
+            analysisMessage={analysisMessage}
+            guidanceSources={guidanceSources}
+            handleGenerateAIAnalysis={handleGenerateAIAnalysis}
+            isCompleting={isCompleting}
+            isGeneratingAnalysis={isGeneratingAnalysis}
+            keyRisks={keyRisks}
+            keyStrengths={keyStrengths}
+            limitations={limitations}
+            priorityActions={priorityActions}
+            roadmap={roadmap}
+          />
+        )}
 
-              <h2 className="mt-1 text-2xl font-bold text-slate-900">
-                WorkSafe-grounded improvement
-                analysis
-              </h2>
-
-              <p className="mt-2 max-w-3xl text-slate-600">
-                Recommendations use the
-                assessment evidence together
-                with curated official WorkSafe
-                SafePlus guidance.
-              </p>
-            </div>
-
-            {aiAnalysis && (
-              <div className="text-right text-sm text-slate-500">
-                <p className="font-semibold text-slate-700">
-                  {aiAnalysis.ai_provider}
-                </p>
-
-                {aiAnalysis.generated_at && (
-                  <p className="mt-1">
-                    Generated{" "}
-                    {new Date(
-                      aiAnalysis.generated_at,
-                    ).toLocaleString()}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {!aiAnalysis ? (
-            <div className="mt-8 rounded-lg border border-dashed border-slate-300 p-8 text-center">
-              <h3 className="font-bold text-slate-900">
-                AI analysis has not been
-                generated
-              </h3>
-
-              <p className="mt-2 text-slate-600">
-                Complete the assessment and
-                click Generate AI analysis.
-              </p>
-            </div>
-          ) : aiAnalysis.status !==
-            "completed" ? (
-            <div className="mt-8 rounded-lg bg-amber-50 p-5 text-amber-800">
-              AI analysis status:{" "}
-              <span className="font-semibold capitalize">
-                {aiAnalysis.status}
-              </span>
-            </div>
-          ) : (
-            <div className="mt-8 space-y-8">
-              <article className="rounded-xl bg-violet-50 p-6">
-                <h3 className="text-xl font-bold text-violet-950">
-                  Overall summary
-                </h3>
-
-                <p className="mt-4 whitespace-pre-line leading-7 text-slate-700">
-                  {aiAnalysis.overall_summary}
-                </p>
-              </article>
-
-              <div className="grid gap-6 lg:grid-cols-2">
-                <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
-                  <h3 className="text-xl font-bold text-emerald-900">
-                    Key strengths
-                  </h3>
-
-                  {keyStrengths.length ===
-                  0 ? (
-                    <p className="mt-3 text-emerald-800">
-                      No strengths were
-                      returned.
-                    </p>
-                  ) : (
-                    <ul className="mt-4 space-y-3">
-                      {keyStrengths.map(
-                        (strength, index) => (
-                          <li
-                            key={`${strength}-${index}`}
-                            className="flex gap-3 text-slate-700"
-                          >
-                            <span className="font-bold text-emerald-700">
-                              ✓
-                            </span>
-
-                            <span>
-                              {strength}
-                            </span>
-                          </li>
-                        ),
-                      )}
-                    </ul>
-                  )}
-                </article>
-
-                <article className="rounded-xl border border-red-200 bg-red-50 p-6">
-                  <h3 className="text-xl font-bold text-red-900">
-                    Key risks
-                  </h3>
-
-                  {keyRisks.length === 0 ? (
-                    <p className="mt-3 text-red-800">
-                      No risks were returned.
-                    </p>
-                  ) : (
-                    <ul className="mt-4 space-y-3">
-                      {keyRisks.map(
-                        (risk, index) => (
-                          <li
-                            key={`${risk}-${index}`}
-                            className="flex gap-3 text-slate-700"
-                          >
-                            <span className="font-bold text-red-700">
-                              !
-                            </span>
-
-                            <span>{risk}</span>
-                          </li>
-                        ),
-                      )}
-                    </ul>
-                  )}
-                </article>
-              </div>
-
-              <section>
-                <h3 className="text-2xl font-bold text-slate-900">
-                  Domain analysis
-                </h3>
-
-                <div className="mt-5 grid gap-5 lg:grid-cols-3">
-                  {aiDomainSummaries.map(
-                    (domainSummary) => (
-                      <article
-                        key={
-                          domainSummary.domain_name
-                        }
-                        className="rounded-xl border border-slate-200 p-6"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <h4 className="font-bold text-slate-900">
-                            {
-                              domainSummary.domain_name
-                            }
-                          </h4>
-
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getMaturityClasses(
-                              domainSummary.maturity_level,
-                            )}`}
-                          >
-                            {
-                              domainSummary.maturity_level
-                            }
-                          </span>
-                        </div>
-
-                        <p className="mt-3 text-3xl font-bold text-slate-900">
-                          {formatScore(
-                            domainSummary.score,
-                          )}
-                        </p>
-
-                        <p className="mt-4 leading-7 text-slate-700">
-                          {
-                            domainSummary.summary
-                          }
-                        </p>
-
-                        {domainSummary
-                          .strengths.length >
-                          0 && (
-                          <div className="mt-5">
-                            <p className="text-sm font-bold text-emerald-800">
-                              Strengths
-                            </p>
-
-                            <ul className="mt-2 space-y-2 text-sm text-slate-700">
-                              {domainSummary.strengths.map(
-                                (
-                                  strength,
-                                  index,
-                                ) => (
-                                  <li
-                                    key={`${strength}-${index}`}
-                                  >
-                                    • {strength}
-                                  </li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
-                        )}
-
-                        {domainSummary
-                          .improvement_areas
-                          .length > 0 && (
-                          <div className="mt-5">
-                            <p className="text-sm font-bold text-orange-800">
-                              Improvement areas
-                            </p>
-
-                            <ul className="mt-2 space-y-2 text-sm text-slate-700">
-                              {domainSummary.improvement_areas.map(
-                                (
-                                  improvement,
-                                  index,
-                                ) => (
-                                  <li
-                                    key={`${improvement}-${index}`}
-                                  >
-                                    •{" "}
-                                    {improvement}
-                                  </li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
-                        )}
-
-                        <SourceLinks
-                          sourceIds={
-                            domainSummary.source_ids
-                          }
-                          sources={
-                            guidanceSources
-                          }
-                        />
-                      </article>
-                    ),
-                  )}
-                </div>
-              </section>
-
-              <section>
-                <h3 className="text-2xl font-bold text-slate-900">
-                  Priority actions
-                </h3>
-
-                <div className="mt-5 space-y-5">
-                  {priorityActions.map(
-                    (action) => (
-                      <article
-                        key={`${action.priority}-${action.title}`}
-                        className="rounded-xl border border-slate-200 p-6"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-4">
-                          <div>
-                            <p className="text-sm font-semibold uppercase tracking-wide text-violet-700">
-                              Priority{" "}
-                              {action.priority}
-                            </p>
-
-                            <h4 className="mt-1 text-xl font-bold text-slate-900">
-                              {action.title}
-                            </h4>
-
-                            <p className="mt-1 text-sm text-slate-500">
-                              {
-                                action.related_domain
-                              }
-                            </p>
-                          </div>
-
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getUrgencyClasses(
-                              action.urgency,
-                            )}`}
-                          >
-                            {action.urgency}
-                          </span>
-                        </div>
-
-                        <div className="mt-5 grid gap-5 lg:grid-cols-2">
-                          <div>
-                            <p className="font-bold text-slate-900">
-                              Assessment
-                              evidence
-                            </p>
-
-                            <ul className="mt-2 space-y-2 text-slate-700">
-                              {action.assessment_evidence.map(
-                                (
-                                  evidence,
-                                  index,
-                                ) => (
-                                  <li
-                                    key={`${evidence}-${index}`}
-                                  >
-                                    • {evidence}
-                                  </li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
-
-                          <div>
-                            <p className="font-bold text-slate-900">
-                              Why this matters
-                            </p>
-
-                            <p className="mt-2 leading-7 text-slate-700">
-                              {action.reason}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="mt-5 rounded-lg bg-slate-50 p-5">
-                          <p className="font-bold text-slate-900">
-                            Recommended action
-                          </p>
-
-                          <p className="mt-2 leading-7 text-slate-700">
-                            {
-                              action.recommended_action
-                            }
-                          </p>
-                        </div>
-
-                        <p className="mt-4 text-sm text-slate-600">
-                          <span className="font-semibold">
-                            Source relevance:
-                          </span>{" "}
-                          {
-                            action.source_relevance
-                          }
-                        </p>
-
-                        <SourceLinks
-                          sourceIds={
-                            action.source_ids
-                          }
-                          sources={
-                            guidanceSources
-                          }
-                        />
-                      </article>
-                    ),
-                  )}
-                </div>
-              </section>
-
-              <section>
-                <h3 className="text-2xl font-bold text-slate-900">
-                  Improvement roadmap
-                </h3>
-
-                <div className="mt-5 space-y-4">
-                  {roadmap.map(
-                    (item, index) => (
-                      <article
-                        key={`${item.timeframe}-${index}`}
-                        className="rounded-xl border border-slate-200 p-6"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-4">
-                          <div>
-                            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-                              {item.timeframe}
-                            </p>
-
-                            <h4 className="mt-1 text-lg font-bold text-slate-900">
-                              {item.objective}
-                            </h4>
-                          </div>
-
-                          <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800">
-                            Step {index + 1}
-                          </span>
-                        </div>
-
-                        <div className="mt-5">
-                          <p className="font-bold text-slate-900">
-                            Actions
-                          </p>
-
-                          <ul className="mt-2 space-y-2 text-slate-700">
-                            {item.actions.map(
-                              (
-                                roadmapAction,
-                                actionIndex,
-                              ) => (
-                                <li
-                                  key={`${roadmapAction}-${actionIndex}`}
-                                >
-                                  •{" "}
-                                  {roadmapAction}
-                                </li>
-                              ),
-                            )}
-                          </ul>
-                        </div>
-
-                        <div className="mt-5 rounded-lg bg-emerald-50 p-4">
-                          <p className="text-sm font-bold text-emerald-900">
-                            Success indicator
-                          </p>
-
-                          <p className="mt-1 text-sm text-emerald-800">
-                            {
-                              item.success_indicator
-                            }
-                          </p>
-                        </div>
-
-                        <SourceLinks
-                          sourceIds={
-                            item.source_ids
-                          }
-                          sources={
-                            guidanceSources
-                          }
-                        />
-                      </article>
-                    ),
-                  )}
-                </div>
-              </section>
-
-              {guidanceSources.length > 0 && (
-                <section className="rounded-xl bg-slate-50 p-6">
-                  <h3 className="text-xl font-bold text-slate-900">
-                    Official guidance sources
-                  </h3>
-
-                  <p className="mt-2 text-sm text-slate-600">
-                    The AI was limited to
-                    curated summaries of these
-                    official WorkSafe SafePlus
-                    resources.
-                  </p>
-
-                  <div className="mt-5 grid gap-4 md:grid-cols-2">
-                    {guidanceSources.map(
-                      (source) => (
-                        <a
-                          key={source.source_id}
-                          href={source.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-lg border border-slate-200 bg-white p-4 hover:border-cyan-400"
-                        >
-                          <p className="font-bold text-cyan-800">
-                            {source.title}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-500">
-                            {source.source_id}
-                          </p>
-                        </a>
-                      ),
-                    )}
-                  </div>
-                </section>
-              )}
-
-              {limitations.length > 0 && (
-                <section className="rounded-xl border border-amber-200 bg-amber-50 p-6">
-                  <h3 className="text-xl font-bold text-amber-900">
-                    Important limitations
-                  </h3>
-
-                  <ul className="mt-4 space-y-3 text-amber-900">
-                    {limitations.map(
-                      (
-                        limitation,
-                        index,
-                      ) => (
-                        <li
-                          key={`${limitation}-${index}`}
-                        >
-                          • {limitation}
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </section>
-              )}
-            </div>
-          )}
-        </section>
       </section>
     </main>
   );

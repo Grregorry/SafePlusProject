@@ -45,7 +45,7 @@ function QuestionsPage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-slate-100 p-8">
+      <main>
         <p className="text-slate-700">Loading SafePlus questions...</p>
       </main>
     );
@@ -53,7 +53,7 @@ function QuestionsPage() {
 
   if (errorMessage) {
     return (
-      <main className="min-h-screen bg-slate-100 p-8">
+      <main>
         <section className="mx-auto max-w-4xl rounded-lg bg-white p-6 shadow">
           <h1 className="text-2xl font-bold text-red-700">
             Unable to load questions
@@ -66,8 +66,8 @@ function QuestionsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-6 py-10">
-      <section className="mx-auto max-w-5xl">
+    <main>
+      <section>
         <header className="rounded-xl bg-white p-8 shadow">
           <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
             SafePlus Tool

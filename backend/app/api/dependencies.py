@@ -3,11 +3,12 @@ from typing import Annotated
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
 from app.db.session import get_db
-from app.models import Organisation
+from app.models import Assessment, Organisation
 
 
 oauth2_scheme = OAuth2PasswordBearer(
@@ -70,3 +71,25 @@ CurrentOrganisation = Annotated[
     Organisation,
     Depends(get_current_organisation),
 ]
+
+
+def get_owned_assessment(
+    assessment_id: int,
+    organisation_id: int,
+    database: DatabaseSession,
+) -> Assessment:
+    """Return the assessment if it belongs to the organisation, else 404."""
+    assessment = database.scalar(
+        select(Assessment).where(
+            Assessment.id == assessment_id,
+            Assessment.organisation_id == organisation_id,
+        )
+    )
+
+    if assessment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assessment not found.",
+        )
+
+    return assessment

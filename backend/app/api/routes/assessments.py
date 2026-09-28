@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from fastapi import (
     APIRouter,
     HTTPException,
-    Response,
     status,
 )
 from sqlalchemy import delete, func, select
@@ -12,19 +11,18 @@ from sqlalchemy.orm import selectinload
 from app.api.dependencies import (
     CurrentOrganisation,
     DatabaseSession,
+    get_owned_assessment,
 )
 from app.models import (
-    AIAnalysis,
     Assessment,
     AssessmentQuestion,
     Domain,
+    ManualResponseCount,
     Question,
     ResponseCount,
+    SurveySubmission,
 )
 
-from app.services.assessment_report import (
-    generate_assessment_report,
-)
 from app.models.question_score import QuestionScore
 from app.schemas.assessment import (
     AssessmentCompletionResponse,
@@ -32,6 +30,7 @@ from app.schemas.assessment import (
     AssessmentQuestionSetupResponse,
     AssessmentResponse,
     AssessmentScoringResponse,
+    ExpectedManualEntriesUpdate,
     IncompleteQuestionResponse,
     QuestionResponsesResponse,
     QuestionResponsesUpdate,
@@ -45,27 +44,6 @@ router = APIRouter(
     prefix="/api/assessments",
     tags=["assessments"],
 )
-
-
-def get_owned_assessment(
-    assessment_id: int,
-    organisation_id: int,
-    database: DatabaseSession,
-) -> Assessment:
-    assessment = database.scalar(
-        select(Assessment).where(
-            Assessment.id == assessment_id,
-            Assessment.organisation_id == organisation_id,
-        )
-    )
-
-    if assessment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Assessment not found.",
-        )
-
-    return assessment
 
 
 def ensure_assessment_is_editable(
@@ -241,60 +219,6 @@ def get_assessment(
         database,
     )
 
-@router.get(
-    "/{assessment_id}/report",
-    response_class=Response,
-)
-def download_assessment_report(
-    assessment_id: int,
-    organisation: CurrentOrganisation,
-    database: DatabaseSession,
-) -> Response:
-    assessment = get_owned_assessment(
-        assessment_id,
-        organisation.id,
-        database,
-    )
-
-    if assessment.status != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Complete the assessment before "
-                "downloading the report."
-            ),
-        )
-
-    analysis = database.scalar(
-        select(AIAnalysis).where(
-            AIAnalysis.assessment_id
-            == assessment.id,
-        )
-    )
-
-    pdf_bytes = generate_assessment_report(
-        assessment=assessment,
-        organisation=organisation,
-        analysis=analysis,
-        database=database,
-    )
-
-    safe_filename = (
-        f"safeplus-assessment-"
-        f"{assessment.organisation_assessment_number}"
-        f".pdf"
-    )
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="{safe_filename}"'
-            ),
-        },
-    )
-
 @router.delete(
     "/{assessment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -447,15 +371,33 @@ def update_situation_question_selection(
             ),
         )
 
-    database.execute(
-        delete(AssessmentQuestion).where(
-            AssessmentQuestion.assessment_id
-            == assessment.id,
-            AssessmentQuestion.question_id.in_(
-                valid_situation_ids
-            ),
-        )
+    # Only touch questions whose selection changed. Deleting an
+    # assessment question cascades to its responses, so questions that
+    # stay selected must keep their existing rows.
+    current_ids = set(
+        database.scalars(
+            select(AssessmentQuestion.question_id).where(
+                AssessmentQuestion.assessment_id
+                == assessment.id,
+                AssessmentQuestion.question_id.in_(
+                    valid_situation_ids
+                ),
+            )
+        ).all()
     )
+
+    removed_ids = current_ids - requested_ids
+
+    if removed_ids:
+        database.execute(
+            delete(AssessmentQuestion).where(
+                AssessmentQuestion.assessment_id
+                == assessment.id,
+                AssessmentQuestion.question_id.in_(
+                    removed_ids
+                ),
+            )
+        )
 
     database.add_all(
         [
@@ -464,7 +406,9 @@ def update_situation_question_selection(
                 question_id=question_id,
                 is_active=True,
             )
-            for question_id in requested_ids
+            for question_id in (
+                requested_ids - current_ids
+            )
         ]
     )
 
@@ -474,6 +418,42 @@ def update_situation_question_selection(
         assessment_id,
         organisation,
         database,
+    )
+
+
+@router.put(
+    "/{assessment_id}/expected-manual-entries",
+    response_model=AssessmentResponse,
+)
+def update_expected_manual_entries(
+    assessment_id: int,
+    update: ExpectedManualEntriesUpdate,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> AssessmentResponse:
+    assessment = get_owned_assessment(
+        assessment_id,
+        organisation.id,
+        database,
+    )
+
+    ensure_assessment_is_editable(
+        assessment
+    )
+
+    assessment.expected_manual_entries_employee = (
+        update.expected_manual_entries_employee
+    )
+
+    assessment.expected_manual_entries_manager = (
+        update.expected_manual_entries_manager
+    )
+
+    database.commit()
+    database.refresh(assessment)
+
+    return AssessmentResponse.model_validate(
+        assessment
     )
 
 
@@ -564,16 +544,16 @@ def update_question_responses(
             )
 
     database.execute(
-        delete(ResponseCount).where(
-            ResponseCount.assessment_question_id
+        delete(ManualResponseCount).where(
+            ManualResponseCount.assessment_question_id
             == assessment_question.id,
-            ResponseCount.respondent_group
+            ManualResponseCount.respondent_group
             == response_update.respondent_group,
         )
     )
 
     response_rows = [
-        ResponseCount(
+        ManualResponseCount(
             assessment_question_id=(
                 assessment_question.id
             ),
@@ -655,6 +635,67 @@ def get_question_responses(
 
     response_rows = list(
         database.scalars(
+            select(ManualResponseCount)
+            .where(
+                ManualResponseCount.assessment_question_id
+                == assessment_question.id,
+                ManualResponseCount.respondent_group
+                == respondent_group,
+            )
+            .order_by(ManualResponseCount.id)
+        ).all()
+    )
+
+    return QuestionResponsesResponse(
+        assessment_id=assessment_id,
+        question_id=question_id,
+        respondent_group=respondent_group,
+        responses=[
+            ResponseCountResponse.model_validate(
+                row
+            )
+            for row in response_rows
+        ],
+    )
+
+
+@router.get(
+    (
+        "/{assessment_id}/questions/"
+        "{question_id}/digital-responses/"
+        "{respondent_group}"
+    ),
+    response_model=QuestionResponsesResponse,
+)
+def get_digital_question_responses(
+    assessment_id: int,
+    question_id: int,
+    respondent_group: str,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> QuestionResponsesResponse:
+    if respondent_group not in {
+        "Employee",
+        "Senior Manager",
+    }:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail="Invalid respondent group.",
+        )
+
+    assessment_question = (
+        get_active_assessment_question(
+            assessment_id,
+            question_id,
+            organisation.id,
+            database,
+        )
+    )
+
+    response_rows = list(
+        database.scalars(
             select(ResponseCount)
             .where(
                 ResponseCount.assessment_question_id
@@ -694,6 +735,18 @@ def calculate_scores(
         database,
     )
 
+    # With few respondents, a score that updates as responses arrive
+    # can reveal how the latest person answered. Scores only exist
+    # once the assessment is closed.
+    if assessment.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Scores are available once the "
+                "assessment is completed."
+            ),
+        )
+
     scoring_result = (
         calculate_assessment_scores(
             assessment,
@@ -706,6 +759,63 @@ def calculate_scores(
             scoring_result
         )
     )
+
+
+# Fewest responses (online plus paper, both groups together) for an
+# assessment to be completed. Fewer can't be compared reliably with other
+# assessments and make individual answers easier to pick out.
+MINIMUM_RESPONSES_TO_COMPLETE = 5
+
+
+def count_assessment_responses(
+    assessment: Assessment,
+    database: DatabaseSession,
+) -> tuple[int, int]:
+    online = database.scalar(
+        select(func.count(SurveySubmission.id)).where(
+            SurveySubmission.assessment_id
+            == assessment.id,
+            SurveySubmission.status == "submitted",
+        )
+    ) or 0
+
+    # Paper totals are entered one question at a time, so the most
+    # entries recorded for any question is the number of paper surveys.
+    paper = 0
+
+    for respondent_group in (
+        "Employee",
+        "Senior Manager",
+    ):
+        per_question = database.scalars(
+            select(
+                func.coalesce(
+                    func.sum(ManualResponseCount.count),
+                    0,
+                )
+            )
+            .join(
+                AssessmentQuestion,
+                ManualResponseCount.assessment_question_id
+                == AssessmentQuestion.id,
+            )
+            .where(
+                AssessmentQuestion.assessment_id
+                == assessment.id,
+                AssessmentQuestion.is_active.is_(True),
+                ManualResponseCount.respondent_group
+                == respondent_group,
+                ManualResponseCount.response_option
+                != "N/A",
+            )
+            .group_by(
+                ManualResponseCount.assessment_question_id
+            )
+        ).all()
+
+        paper += max(per_question, default=0)
+
+    return online, paper
 
 
 @router.post(
@@ -784,6 +894,34 @@ def complete_assessment(
             ),
             questions_scored=(
                 question_score_count or 0
+            ),
+        )
+
+    online_responses, paper_responses = (
+        count_assessment_responses(
+            assessment,
+            database,
+        )
+    )
+
+    response_total = (
+        online_responses + paper_responses
+    )
+
+    if (
+        response_total
+        < MINIMUM_RESPONSES_TO_COMPLETE
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+            ),
+            detail=(
+                f"At least {MINIMUM_RESPONSES_TO_COMPLETE} "
+                "responses in total from employees "
+                "and senior managers are needed to "
+                "complete this assessment. It has "
+                f"{response_total} so far."
             ),
         )
 
