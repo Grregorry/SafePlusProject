@@ -1,3 +1,5 @@
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,10 +18,29 @@ from app.core.security import (
 from app.db.session import get_db
 from app.models import Organisation
 from app.schemas.auth import (
+    EmailVerificationResponse,
     OrganisationRegisterRequest,
     OrganisationResponse,
+    ResendVerificationResponse,
     TokenResponse,
 )
+
+
+VERIFICATION_TOKEN_VALIDITY_HOURS = 24
+
+
+def generate_verification_token() -> tuple[
+    str, datetime
+]:
+    token = secrets.token_urlsafe(32)
+
+    expires_at = datetime.now(
+        timezone.utc
+    ) + timedelta(
+        hours=VERIFICATION_TOKEN_VALIDITY_HOURS
+    )
+
+    return token, expires_at
 
 
 router = APIRouter(
@@ -57,6 +78,10 @@ def register_organisation(
             detail="An account with this email already exists.",
         )
 
+    verification_token, verification_expires_at = (
+        generate_verification_token()
+    )
+
     organisation = Organisation(
     name=normalised_name,
     category=registration.category,
@@ -65,6 +90,8 @@ def register_organisation(
         registration.password
     ),
     is_verified=False,
+    verification_token=verification_token,
+    verification_expires_at=verification_expires_at,
 )
 
     database.add(organisation)
@@ -132,3 +159,107 @@ def get_current_account(
     organisation: CurrentOrganisation,
 ) -> Organisation:
     return organisation
+
+
+@router.get(
+    "/verify",
+    response_model=EmailVerificationResponse,
+)
+def verify_organisation_email(
+    token: str,
+    database: DatabaseSession,
+) -> EmailVerificationResponse:
+    organisation = database.scalar(
+        select(Organisation).where(
+            Organisation.verification_token
+            == token,
+        )
+    )
+
+    if organisation is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "This verification link is "
+                "invalid."
+            ),
+        )
+
+    if organisation.is_verified:
+        return EmailVerificationResponse(
+            message=(
+                "This account is already "
+                "verified."
+            ),
+            is_verified=True,
+        )
+
+    expires_at = (
+        organisation.verification_expires_at
+    )
+
+    if (
+        expires_at is None
+        or expires_at < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "This verification link has "
+                "expired. Request a new one from "
+                "your account page."
+            ),
+        )
+
+    organisation.is_verified = True
+    organisation.verification_token = None
+    organisation.verification_expires_at = None
+
+    database.commit()
+
+    return EmailVerificationResponse(
+        message="Your organisation is now verified.",
+        is_verified=True,
+    )
+
+
+@router.post(
+    "/resend-verification",
+    response_model=ResendVerificationResponse,
+)
+def resend_verification(
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> ResendVerificationResponse:
+    if organisation.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This account is already "
+                "verified."
+            ),
+        )
+
+    verification_token, verification_expires_at = (
+        generate_verification_token()
+    )
+
+    organisation.verification_token = (
+        verification_token
+    )
+    organisation.verification_expires_at = (
+        verification_expires_at
+    )
+
+    database.commit()
+
+    return ResendVerificationResponse(
+        message=(
+            "No email provider is configured "
+            "for this prototype, so the "
+            "verification link is shown below "
+            "directly (per NFR11's email-failure "
+            "fallback)."
+        ),
+        verification_token=verification_token,
+    )

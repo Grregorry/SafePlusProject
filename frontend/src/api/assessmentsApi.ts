@@ -1,3 +1,6 @@
+import { API_BASE_URL } from "./config";
+import { getErrorMessage } from "./errors";
+
 export type Assessment = {
   id: number;
   organisation_id: number;
@@ -8,6 +11,8 @@ export type Assessment = {
   completed_at: string | null;
   overall_combined_mean: string | null;
   overall_maturity_label: string | null;
+  expected_manual_entries_employee: number;
+  expected_manual_entries_manager: number;
 };
 
 export type AssessmentSetupQuestion = {
@@ -86,73 +91,6 @@ export type AssessmentCompletionResult = {
   overall_maturity_label: string;
   questions_scored: number;
 };
-
-type ApiErrorResponse = {
-  detail?:
-    | string
-    | {
-        message?: string;
-        incomplete_questions?: Array<{
-          question_id: number;
-          question_number: string;
-          missing_groups: string[];
-        }>;
-      };
-};
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ??
-  "http://127.0.0.1:8000";
-
-async function getErrorMessage(
-  response: Response,
-): Promise<string> {
-  try {
-    const error =
-      (await response.json()) as ApiErrorResponse;
-
-    if (typeof error.detail === "string") {
-      return error.detail;
-    }
-
-    if (
-      error.detail &&
-      typeof error.detail === "object"
-    ) {
-      const message =
-        error.detail.message ??
-        "The request could not be completed.";
-
-      const incompleteQuestions =
-        error.detail.incomplete_questions ?? [];
-
-      if (incompleteQuestions.length === 0) {
-        return message;
-      }
-
-      const details = incompleteQuestions
-        .slice(0, 10)
-        .map(
-          (question) =>
-            `${question.question_number}: missing ${question.missing_groups.join(
-              " and ",
-            )}`,
-        )
-        .join("; ");
-
-      const remaining =
-        incompleteQuestions.length - 10;
-
-      return remaining > 0
-        ? `${message} ${details}; and ${remaining} more.`
-        : `${message} ${details}.`;
-    }
-  } catch {
-    // Response did not contain valid JSON.
-  }
-
-  return `Request failed with status ${response.status}.`;
-}
 
 export async function getAssessments(
   accessToken: string,
@@ -233,6 +171,38 @@ export async function getAssessment(
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  return response.json() as Promise<Assessment>;
+}
+
+export async function updateExpectedManualEntries(
+  assessmentId: number,
+  expectedManualEntriesEmployee: number,
+  expectedManualEntriesManager: number,
+  accessToken: string,
+): Promise<Assessment> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/expected-manual-entries`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        expected_manual_entries_employee:
+          expectedManualEntriesEmployee,
+        expected_manual_entries_manager:
+          expectedManualEntriesManager,
+      }),
     },
   );
 
@@ -348,6 +318,33 @@ export async function getQuestionResponses(
   return response.json() as Promise<QuestionResponses>;
 }
 
+export async function getDigitalQuestionResponses(
+  assessmentId: number,
+  questionId: number,
+  respondentGroup: RespondentGroup,
+  accessToken: string,
+): Promise<QuestionResponses> {
+  const encodedGroup =
+    encodeURIComponent(respondentGroup);
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/assessments/${assessmentId}/questions/${questionId}/digital-responses/${encodedGroup}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  return response.json() as Promise<QuestionResponses>;
+}
+
 export async function updateQuestionResponses(
   assessmentId: number,
   questionId: number,
@@ -425,12 +422,13 @@ export async function completeAssessment(
   return response.json() as Promise<AssessmentCompletionResult>;
 }
 
-export async function downloadAssessmentReport(
-  assessmentId: number,
+async function downloadReportFromPath(
+  path: string,
   accessToken: string,
+  defaultFilename: string,
 ): Promise<void> {
   const response = await fetch(
-    `${API_BASE_URL}/api/assessments/${assessmentId}/report`,
+    `${API_BASE_URL}${path}`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -460,8 +458,7 @@ export async function downloadAssessmentReport(
     );
 
   const filename =
-    filenameMatch?.[1] ??
-    `safeplus-assessment-${assessmentId}.pdf`;
+    filenameMatch?.[1] ?? defaultFilename;
 
   const link =
     document.createElement("a");
@@ -475,5 +472,71 @@ export async function downloadAssessmentReport(
 
   window.URL.revokeObjectURL(
     downloadUrl,
+  );
+}
+
+// AI text is only added to a report when the person downloading it
+// chooses to include it.
+function reportQuery(
+  includeAi: boolean,
+): string {
+  return `?include_ai=${includeAi ? "true" : "false"}`;
+}
+
+function reportFilename(
+  name: string,
+  assessmentId: number,
+  includeAi: boolean,
+): string {
+  return `safeplus-${name}-${assessmentId}${
+    includeAi ? "-with-ai" : ""
+  }.pdf`;
+}
+
+export async function downloadAssessmentReport(
+  assessmentId: number,
+  includeAi: boolean,
+  accessToken: string,
+): Promise<void> {
+  await downloadReportFromPath(
+    `/api/assessments/${assessmentId}/report${reportQuery(includeAi)}`,
+    accessToken,
+    reportFilename("assessment", assessmentId, includeAi),
+  );
+}
+
+export async function downloadBusinessLeaderReport(
+  assessmentId: number,
+  includeAi: boolean,
+  accessToken: string,
+): Promise<void> {
+  await downloadReportFromPath(
+    `/api/assessments/${assessmentId}/report/business-leader${reportQuery(includeAi)}`,
+    accessToken,
+    reportFilename("business-leader-report", assessmentId, includeAi),
+  );
+}
+
+export async function downloadBoardReport(
+  assessmentId: number,
+  includeAi: boolean,
+  accessToken: string,
+): Promise<void> {
+  await downloadReportFromPath(
+    `/api/assessments/${assessmentId}/report/board${reportQuery(includeAi)}`,
+    accessToken,
+    reportFilename("board-report", assessmentId, includeAi),
+  );
+}
+
+export async function downloadOperationalManagerReport(
+  assessmentId: number,
+  includeAi: boolean,
+  accessToken: string,
+): Promise<void> {
+  await downloadReportFromPath(
+    `/api/assessments/${assessmentId}/report/operational-manager${reportQuery(includeAi)}`,
+    accessToken,
+    reportFilename("operational-manager-report", assessmentId, includeAi),
   );
 }

@@ -9,6 +9,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.assessment import Assessment
+    from app.models.manual_response_count import ManualResponseCount
     from app.models.question import Question
     from app.models.question_score import QuestionScore
     from app.models.response_count import ResponseCount
@@ -59,6 +60,12 @@ class AssessmentQuestion(Base):
     )
 
     response_counts: Mapped[list["ResponseCount"]] = relationship(
+        back_populates="assessment_question",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    manual_response_counts: Mapped[list["ManualResponseCount"]] = relationship(
         back_populates="assessment_question",
         cascade="all, delete-orphan",
         passive_deletes=True,

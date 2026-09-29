@@ -9,19 +9,46 @@ import {
 } from "react-router-dom";
 
 import {
+  completeAssessment,
+  deleteAssessment,
+  getAssessment,
   getAssessmentQuestions,
   getSurveyAccess,
   updateQuestionSelection,
+  type Assessment,
   type AssessmentSetupQuestion,
   type SurveyAccess,
 } from "../../api/assessmentsApi";
 
+import { useConfirm } from "../../components/useConfirm";
+import {
+  MINIMUM_RESPONSES,
+  completeConfirmMessage,
+  deleteConfirmMessage,
+  fetchEntryTotals,
+  tooFewResponsesMessage,
+  type EntryTotals,
+} from "./assessmentCompletion";
 import SubmissionManagementPanel from "./SubmissionManagementPanel";
 
-import {
-  getSubmissionSummary,
-  type SubmissionSummary,
-} from "../../api/submissionSummaryApi";
+type SetupTab =
+  | "sessions"
+  | "questions";
+
+const setupTabs: {
+  id: SetupTab;
+  label: string;
+}[] = [
+  {
+    id: "sessions",
+    label: "Survey sessions",
+  },
+  {
+    id: "questions",
+    label:
+      "Additional situation-dependent questions",
+  },
+];
 
 function AssessmentSetupPage() {
   const navigate = useNavigate();
@@ -30,6 +57,18 @@ function AssessmentSetupPage() {
   const numericAssessmentId = Number(
     assessmentId,
   );
+
+  const { choose, confirm, dialog } =
+    useConfirm();
+
+  const [isCompleting, setIsCompleting] =
+    useState(false);
+
+  const [assessment, setAssessment] =
+    useState<Assessment | null>(null);
+
+  const [activeTab, setActiveTab] =
+    useState<SetupTab>("sessions");
 
   const [questions, setQuestions] =
     useState<AssessmentSetupQuestion[]>([]);
@@ -42,23 +81,11 @@ function AssessmentSetupPage() {
   const [surveyAccess, setSurveyAccess] =
     useState<SurveyAccess | null>(null);
 
-  const [
-    submissionSummary,
-    setSubmissionSummary,
-  ] = useState<SubmissionSummary | null>(
-    null,
-  );
-
   const [isLoading, setIsLoading] =
     useState(true);
 
   const [isSaving, setIsSaving] =
     useState(false);
-
-  const [
-    isRefreshingSummary,
-    setIsRefreshingSummary,
-  ] = useState(false);
 
   const [
     errorMessage,
@@ -101,10 +128,14 @@ function AssessmentSetupPage() {
         setErrorMessage("");
 
         const [
+          loadedAssessment,
           loadedQuestions,
           loadedSurveyAccess,
-          loadedSubmissionSummary,
         ] = await Promise.all([
+          getAssessment(
+            numericAssessmentId,
+            accessToken,
+          ),
           getAssessmentQuestions(
             numericAssessmentId,
             accessToken,
@@ -113,18 +144,25 @@ function AssessmentSetupPage() {
             numericAssessmentId,
             accessToken,
           ),
-          getSubmissionSummary(
-            numericAssessmentId,
-            accessToken,
-          ),
         ]);
 
+        // Closed assessments have nothing left to set up; show their
+        // results instead.
+        if (
+          loadedAssessment.status ===
+          "completed"
+        ) {
+          navigate(
+            `/assessments/${numericAssessmentId}/results`,
+            { replace: true },
+          );
+          return;
+        }
+
+        setAssessment(loadedAssessment);
         setQuestions(loadedQuestions);
         setSurveyAccess(
           loadedSurveyAccess,
-        );
-        setSubmissionSummary(
-          loadedSubmissionSummary,
         );
 
         setSelectedQuestionIds(
@@ -262,47 +300,6 @@ function AssessmentSetupPage() {
     }
   }
 
-  async function handleRefreshSummary() {
-    const accessToken =
-      localStorage.getItem(
-        "safeplus_access_token",
-      );
-
-    if (!accessToken) {
-      navigate("/login", {
-        replace: true,
-      });
-      return;
-    }
-
-    try {
-      setIsRefreshingSummary(true);
-      setErrorMessage("");
-
-      const updatedSummary =
-        await getSubmissionSummary(
-          numericAssessmentId,
-          accessToken,
-        );
-
-      setSubmissionSummary(
-        updatedSummary,
-      );
-
-      setSuccessMessage(
-        "Respondent summary refreshed.",
-      );
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to refresh respondent summary.",
-      );
-    } finally {
-      setIsRefreshingSummary(false);
-    }
-  }
-
   async function handleCopySurveyLink() {
     if (!publicSurveyUrl) {
       setErrorMessage(
@@ -339,15 +336,124 @@ function AssessmentSetupPage() {
     );
   }
 
-  function handleEnterResponses() {
-    navigate(
-      `/assessments/${numericAssessmentId}/responses`,
+  // Same checks as the in-progress assessment page: at least
+  // MINIMUM_RESPONSES responses, with the option to delete instead.
+  async function handleCompleteAssessment() {
+    const accessToken =
+      localStorage.getItem(
+        "safeplus_access_token",
+      );
+
+    if (!accessToken) {
+      navigate("/login", {
+        replace: true,
+      });
+      return;
+    }
+
+    let totals: EntryTotals;
+
+    try {
+      setErrorMessage("");
+      setSuccessMessage("");
+
+      totals = await fetchEntryTotals(
+        numericAssessmentId,
+        accessToken,
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to check how many responses this assessment has.",
+      );
+      return;
+    }
+
+    if (
+      totals.online + totals.paper <
+      MINIMUM_RESPONSES
+    ) {
+      const choice = await choose(
+        tooFewResponsesMessage(totals),
+        {
+          confirmLabel: "OK",
+          showCancel: false,
+          extraLabel: "Delete assessment",
+        },
+      );
+
+      if (choice !== "extra") {
+        return;
+      }
+
+      const confirmedDelete = await confirm(
+        deleteConfirmMessage(
+          assessment?.name,
+        ),
+        {
+          confirmLabel: "Delete",
+        },
+      );
+
+      if (!confirmedDelete) {
+        return;
+      }
+
+      try {
+        await deleteAssessment(
+          numericAssessmentId,
+          accessToken,
+        );
+
+        navigate("/account", {
+          replace: true,
+        });
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to delete the assessment.",
+        );
+      }
+
+      return;
+    }
+
+    const confirmed = await confirm(
+      completeConfirmMessage(totals),
     );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setIsCompleting(true);
+
+      await completeAssessment(
+        numericAssessmentId,
+        accessToken,
+      );
+
+      navigate(
+        `/assessments/${numericAssessmentId}/results`,
+        { replace: true },
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to complete the assessment.",
+      );
+    } finally {
+      setIsCompleting(false);
+    }
   }
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-slate-100 p-8">
+      <main>
         <p className="text-slate-700">
           Loading assessment...
         </p>
@@ -356,31 +462,36 @@ function AssessmentSetupPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-6 py-12">
-      <section className="mx-auto max-w-4xl">
+    <main>
+      {dialog}
+
+      <section>
         <header className="rounded-xl bg-white p-8 shadow">
-          <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-            Assessment #
-            {numericAssessmentId}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
+                {assessment?.name ??
+                  "Assessment overview"}
+              </p>
 
-          <h1 className="mt-2 text-3xl font-bold text-slate-900">
-            Select applicable risks
-          </h1>
+              <h1 className="mt-2 text-3xl font-bold text-slate-900">
+                Assessment overview
+              </h1>
+            </div>
 
-          <p className="mt-3 text-slate-600">
-            All compulsory questions are
-            included automatically. Select any
-            additional situation-dependent risks
-            that apply to your organisation.
-          </p>
-
-          <p className="mt-4 text-sm text-slate-500">
-            {compulsoryQuestionCount} compulsory
-            questions •{" "}
-            {selectedQuestionIds.length}{" "}
-            additional questions selected
-          </p>
+            <button
+              type="button"
+              onClick={() =>
+                void handleCompleteAssessment()
+              }
+              disabled={isCompleting}
+              className="rounded-lg border border-cyan-700 bg-white px-5 py-3 font-semibold text-cyan-800 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isCompleting
+                ? "Completing assessment..."
+                : "Complete assessment"}
+            </button>
+          </div>
 
           {errorMessage && (
             <div className="mt-6 rounded-lg bg-red-50 p-4 text-red-700">
@@ -396,22 +507,14 @@ function AssessmentSetupPage() {
         </header>
 
         <section className="mt-8 rounded-xl bg-white p-8 shadow">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-                Respondent survey
-              </p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
+            Respondent survey
+          </p>
 
-              <h2 className="mt-2 text-2xl font-bold text-slate-900">
-                Share survey link
-              </h2>
-
-              <p className="mt-2 text-slate-600">
-                Send this link to employees and
-                senior managers who need to
-                complete the assessment.
-              </p>
-            </div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-2xl font-bold text-slate-900">
+              Share survey link
+            </h2>
 
             {surveyAccess && (
               <span
@@ -427,6 +530,14 @@ function AssessmentSetupPage() {
               </span>
             )}
           </div>
+
+          <p className="mt-2 text-slate-600">
+            We recommend distributing this link
+            by email to employees and senior
+            managers. Anyone with the link can
+            respond, so only share it with
+            intended participants.
+          </p>
 
           {surveyAccess && (
             <div className="mt-6">
@@ -478,213 +589,136 @@ function AssessmentSetupPage() {
         </section>
 
         <section className="mt-8 rounded-xl bg-white p-8 shadow">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-                Participation
-              </p>
-
-              <h2 className="mt-2 text-2xl font-bold text-slate-900">
-                Respondent summary
-              </h2>
-
-              <p className="mt-2 text-slate-600">
-                Track how many surveys have been
-                started and submitted.
-              </p>
-            </div>
-
-            <button
-            data-refresh-summary
-            type="button"
-            onClick={
-            handleRefreshSummary
-            }
-            disabled={
-            isRefreshingSummary
-          }
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
-            >
-              {isRefreshingSummary
-                ? "Refreshing..."
-                : "Refresh summary"}
-            </button>
+          <div
+            role="tablist"
+            className="flex flex-wrap gap-3"
+          >
+            {setupTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={
+                  activeTab === tab.id
+                }
+                onClick={() =>
+                  setActiveTab(tab.id)
+                }
+                className={`rounded-full px-6 py-3 text-base font-semibold transition ${
+                  activeTab === tab.id
+                    ? "bg-cyan-700 text-white shadow-md scale-105"
+                    : "border-2 border-slate-300 text-slate-700 hover:border-slate-400 hover:bg-slate-50"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {submissionSummary ? (
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <article className="rounded-xl border border-slate-200 p-5">
-                <p className="text-sm font-semibold text-slate-500">
-                  Employee submitted
+          <div className="mt-8">
+            {activeTab === "sessions" && (
+              <SubmissionManagementPanel
+                assessmentId={
+                  numericAssessmentId
+                }
+              />
+            )}
+
+            {activeTab === "questions" && (
+              <div>
+                <p className="text-slate-600">
+                  All compulsory questions are
+                  included automatically.
+                  Select any additional
+                  situation-dependent risks
+                  that apply to your
+                  organisation.
                 </p>
 
-                <p className="mt-2 text-3xl font-bold text-slate-900">
-                  {
-                    submissionSummary.employee_submitted
-                  }
-                </p>
-              </article>
-
-              <article className="rounded-xl border border-slate-200 p-5">
-                <p className="text-sm font-semibold text-slate-500">
-                  Senior Manager submitted
+                <p className="mt-2 text-sm text-slate-500">
+                  {compulsoryQuestionCount}{" "}
+                  compulsory questions •{" "}
+                  {selectedQuestionIds.length}{" "}
+                  additional questions selected
                 </p>
 
-                <p className="mt-2 text-3xl font-bold text-slate-900">
-                  {
-                    submissionSummary.senior_manager_submitted
-                  }
-                </p>
-              </article>
+                {situationQuestions.length ===
+                0 ? (
+                  <div className="mt-6 rounded-lg border border-dashed border-slate-300 p-8 text-center">
+                    <p className="text-slate-700">
+                      No situation-dependent
+                      questions are available.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-6 space-y-4">
+                    {situationQuestions.map(
+                      (question) => (
+                        <label
+                          key={
+                            question.question_id
+                          }
+                          className="flex cursor-pointer gap-4 rounded-lg border border-slate-200 p-5"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedQuestionIds.includes(
+                              question.question_id,
+                            )}
+                            onChange={() =>
+                              toggleQuestion(
+                                question.question_id,
+                              )
+                            }
+                            disabled={
+                              isSurveyClosed
+                            }
+                            className="mt-1 h-5 w-5"
+                          />
 
-              <article className="rounded-xl border border-slate-200 p-5">
-                <p className="text-sm font-semibold text-slate-500">
-                  In progress
-                </p>
+                          <span>
+                            <span className="font-semibold text-slate-900">
+                              {
+                                question.question_number
+                              }{" "}
+                              •{" "}
+                              {
+                                question.domain_name
+                              }
+                            </span>
 
-                <p className="mt-2 text-3xl font-bold text-amber-700">
-                  {
-                    submissionSummary.in_progress_total
-                  }
-                </p>
+                            <span className="mt-2 block text-slate-600">
+                              {
+                                question.employee_text
+                              }
+                            </span>
+                          </span>
+                        </label>
+                      ),
+                    )}
+                  </div>
+                )}
 
-                <p className="mt-2 text-xs text-slate-500">
-                  Employees:{" "}
-                  {
-                    submissionSummary.employee_in_progress
-                  }{" "}
-                  · Managers:{" "}
-                  {
-                    submissionSummary.senior_manager_in_progress
-                  }
-                </p>
-              </article>
-
-              <article className="rounded-xl border border-slate-200 p-5">
-                <p className="text-sm font-semibold text-slate-500">
-                  Total submitted
-                </p>
-
-                <p className="mt-2 text-3xl font-bold text-emerald-700">
-                  {
-                    submissionSummary.submitted_total
-                  }
-                </p>
-
-                <p className="mt-2 text-xs text-slate-500">
-                  {
-                    submissionSummary.started_total
-                  }{" "}
-                  total survey sessions started
-                </p>
-              </article>
-            </div>
-          ) : (
-            <p className="mt-6 text-slate-600">
-              Submission summary is unavailable.
-            </p>
-          )}
-        </section>
-
-          <SubmissionManagementPanel
-          assessmentId={numericAssessmentId}
-          onChanged={() => {
-          const refreshButton =
-          document.querySelector<HTMLButtonElement>(
-          "[data-refresh-summary]",
-        );
-
-        refreshButton?.click();
-      }}
-      />
-        <section className="mt-8 rounded-xl bg-white p-8 shadow">
-          {situationQuestions.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center">
-              <p className="text-slate-700">
-                No situation-dependent
-                questions are available.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {situationQuestions.map(
-                (question) => (
-                  <label
-                    key={
-                      question.question_id
+                <div className="mt-8">
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={
+                      isSaving ||
+                      isSurveyClosed
                     }
-                    className="flex cursor-pointer gap-4 rounded-lg border border-slate-200 p-5"
+                    className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedQuestionIds.includes(
-                        question.question_id,
-                      )}
-                      onChange={() =>
-                        toggleQuestion(
-                          question.question_id,
-                        )
-                      }
-                      disabled={isSurveyClosed}
-                      className="mt-1 h-5 w-5"
-                    />
-
-                    <span>
-                      <span className="font-semibold text-slate-900">
-                        {
-                          question.question_number
-                        }{" "}
-                        • {question.domain_name}
-                      </span>
-
-                      <span className="mt-2 block text-slate-600">
-                        {
-                          question.employee_text
-                        }
-                      </span>
-                    </span>
-                  </label>
-                ),
-              )}
-            </div>
-          )}
-
-          <div className="mt-8 flex flex-wrap gap-4">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={
-                isSaving ||
-                isSurveyClosed
-              }
-              className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSaving
-                ? "Saving..."
-                : "Save selection"}
-            </button>
-
-            <button
-              type="button"
-              onClick={
-                handleEnterResponses
-              }
-              className="rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white"
-            >
-              View responses
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/account")
-              }
-              className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700"
-            >
-              Return to account
-            </button>
+                    {isSaving
+                      ? "Saving..."
+                      : "Save selection"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </section>
+
       </section>
     </main>
   );

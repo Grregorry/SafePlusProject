@@ -4,6 +4,7 @@ from app.models.assessment_question import AssessmentQuestion
 from app.models.domain import Domain
 from app.models.domain_score import DomainScore
 from app.models.individual_response import IndividualResponse
+from app.models.manual_response_count import ManualResponseCount
 from app.models.organisation import Organisation
 from app.models.question import Question
 from app.models.question_score import QuestionScore
@@ -17,6 +18,7 @@ __all__ = [
     "Domain",
     "DomainScore",
     "IndividualResponse",
+    "ManualResponseCount",
     "Organisation",
     "Question",
     "QuestionScore",

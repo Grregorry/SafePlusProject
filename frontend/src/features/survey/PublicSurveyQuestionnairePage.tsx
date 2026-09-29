@@ -17,19 +17,129 @@ import {
   type ResponseOption,
   type SurveySubmissionDetail,
 } from "../../api/publicSurveyApi";
+import { useConfirm } from "../../components/useConfirm";
 
-const standardResponseOptions: ResponseOption[] = [
-  "Strongly Agree",
-  "Agree",
-  "Neither Agree nor Disagree",
-  "Disagree",
-  "Strongly Disagree",
+// The five scale answers, lowest to highest, numbered as they are
+// scored (Strongly Disagree = 1 ... Strongly Agree = 5).
+const scaleOptions: {
+  option: ResponseOption;
+  value: number;
+  label: string;
+}[] = [
+  {
+    option: "Strongly Disagree",
+    value: 1,
+    label: "Strongly disagree",
+  },
+  {
+    option: "Disagree",
+    value: 2,
+    label: "Disagree",
+  },
+  {
+    option: "Neither Agree nor Disagree",
+    value: 3,
+    label: "Neither agree nor disagree",
+  },
+  {
+    option: "Agree",
+    value: 4,
+    label: "Agree",
+  },
+  {
+    option: "Strongly Agree",
+    value: 5,
+    label: "Strongly agree",
+  },
 ];
+
+type DomainSection = {
+  name: string;
+  questions: PublicSurveyQuestion[];
+};
+
+// One section per domain, in the order the questions arrive.
+function groupByDomain(
+  questions: PublicSurveyQuestion[],
+): DomainSection[] {
+  const sections: DomainSection[] = [];
+
+  for (const question of questions) {
+    const section = sections.find(
+      (item) =>
+        item.name === question.domain_name,
+    );
+
+    if (section) {
+      section.questions.push(question);
+    } else {
+      sections.push({
+        name: question.domain_name,
+        questions: [question],
+      });
+    }
+  }
+
+  return sections;
+}
+
+function AnswerChoice({
+  value,
+  label,
+  isSelected,
+  isDisabled,
+  isNotApplicable = false,
+  onSelect,
+}: {
+  value: string;
+  label: string;
+  isSelected: boolean;
+  isDisabled: boolean;
+  isNotApplicable?: boolean;
+  onSelect: () => void;
+}) {
+  const selectedClasses = isNotApplicable
+    ? "border-slate-700 bg-slate-700 text-white"
+    : "border-cyan-700 bg-cyan-700 text-white";
+
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={isSelected}
+      disabled={isDisabled}
+      onClick={onSelect}
+      className="group flex flex-col items-center gap-1.5 disabled:cursor-wait disabled:opacity-60"
+    >
+      <span
+        className={`flex h-12 w-full items-center justify-center rounded-lg border text-lg font-bold transition ${
+          isSelected
+            ? selectedClasses
+            : "border-slate-300 bg-white text-slate-800 group-hover:border-cyan-600"
+        }`}
+      >
+        {value}
+      </span>
+
+      <span
+        className={`text-center text-xs leading-tight ${
+          isSelected
+            ? "font-semibold text-slate-900"
+            : "text-slate-500"
+        }`}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
 
 function PublicSurveyQuestionnairePage() {
   const navigate = useNavigate();
   const { submissionToken } =
     useParams();
+
+  const { confirm, dialog } = useConfirm();
 
   const [
     submission,
@@ -40,15 +150,17 @@ function PublicSurveyQuestionnairePage() {
     );
 
   const [
-    currentQuestionIndex,
-    setCurrentQuestionIndex,
+    currentSectionIndex,
+    setCurrentSectionIndex,
   ] = useState(0);
 
   const [isLoading, setIsLoading] =
     useState(true);
 
-  const [isSaving, setIsSaving] =
-    useState(false);
+  const [
+    savingQuestionId,
+    setSavingQuestionId,
+  ] = useState<number | null>(null);
 
   const [isSubmitting, setIsSubmitting] =
     useState(false);
@@ -58,10 +170,11 @@ function PublicSurveyQuestionnairePage() {
     setErrorMessage,
   ] = useState("");
 
+  // Save errors are shown under the question they belong to.
   const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState("");
+    questionErrors,
+    setQuestionErrors,
+  ] = useState<Record<number, string>>({});
 
   useEffect(() => {
     async function loadSubmission() {
@@ -83,16 +196,21 @@ function PublicSurveyQuestionnairePage() {
 
         setSubmission(loadedSubmission);
 
-        const firstUnansweredIndex =
-          loadedSubmission.questions.findIndex(
-            (question) =>
-              question.selected_response ===
-              null,
+        // Resume at the first section that still needs answers.
+        const firstIncompleteSection =
+          groupByDomain(
+            loadedSubmission.questions,
+          ).findIndex((section) =>
+            section.questions.some(
+              (question) =>
+                question.selected_response ===
+                null,
+            ),
           );
 
-        if (firstUnansweredIndex >= 0) {
-          setCurrentQuestionIndex(
-            firstUnansweredIndex,
+        if (firstIncompleteSection >= 0) {
+          setCurrentSectionIndex(
+            firstIncompleteSection,
           );
         }
       } catch (error) {
@@ -109,37 +227,13 @@ function PublicSurveyQuestionnairePage() {
     void loadSubmission();
   }, [submissionToken]);
 
-  const currentQuestion =
-    useMemo<PublicSurveyQuestion | null>(
-      () =>
-        submission?.questions[
-          currentQuestionIndex
-        ] ?? null,
-      [
-        currentQuestionIndex,
-        submission,
-      ],
-    );
-
-  const availableOptions =
-    useMemo(() => {
-      if (
-        submission?.respondent_group ===
-          "Employee" &&
-        currentQuestion
-          ?.is_situation_dependent
-      ) {
-        return [
-          ...standardResponseOptions,
-          "N/A" as ResponseOption,
-        ];
-      }
-
-      return standardResponseOptions;
-    }, [
-      currentQuestion,
-      submission,
-    ]);
+  const sections = useMemo(
+    () =>
+      groupByDomain(
+        submission?.questions ?? [],
+      ),
+    [submission],
+  );
 
   const progressPercentage =
     useMemo(() => {
@@ -157,39 +251,64 @@ function PublicSurveyQuestionnairePage() {
       );
     }, [submission]);
 
-  async function handleSelectAnswer(
-  responseOption: ResponseOption,
-) {
-  if (
-    !submissionToken ||
-    !currentQuestion ||
-    !submission
-  ) {
-    return;
+  // N/A is only offered to employees on situation-dependent questions;
+  // the backend enforces the same rule.
+  function allowsNotApplicable(
+    question: PublicSurveyQuestion,
+  ): boolean {
+    return (
+      submission?.respondent_group ===
+        "Employee" &&
+      question.is_situation_dependent
+    );
   }
 
-  try {
-    setIsSaving(true);
+  function goToSection(index: number) {
     setErrorMessage("");
-    setSuccessMessage("");
+    setCurrentSectionIndex(index);
 
-    const isDeselecting =
-      currentQuestion.selected_response ===
-      responseOption;
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
 
-    const result = isDeselecting
-      ? await clearSurveyAnswer(
-          submissionToken,
-          currentQuestion.question_id,
-        )
-      : await saveSurveyAnswer(
-          submissionToken,
-          currentQuestion.question_id,
-          responseOption,
-        );
+  async function handleSelectAnswer(
+    question: PublicSurveyQuestion,
+    responseOption: ResponseOption,
+  ) {
+    if (!submissionToken || !submission) {
+      return;
+    }
 
-    setSubmission(
-      (currentSubmission) => {
+    try {
+      setSavingQuestionId(
+        question.question_id,
+      );
+      setErrorMessage("");
+      setQuestionErrors((current) => {
+        const next = { ...current };
+        delete next[question.question_id];
+        return next;
+      });
+
+      // Choosing the selected answer again clears it.
+      const isDeselecting =
+        question.selected_response ===
+        responseOption;
+
+      const result = isDeselecting
+        ? await clearSurveyAnswer(
+            submissionToken,
+            question.question_id,
+          )
+        : await saveSurveyAnswer(
+            submissionToken,
+            question.question_id,
+            responseOption,
+          );
+
+      setSubmission((currentSubmission) => {
         if (!currentSubmission) {
           return null;
         }
@@ -200,63 +319,31 @@ function PublicSurveyQuestionnairePage() {
             result.answered_question_count,
           questions:
             currentSubmission.questions.map(
-              (question) =>
-                question.question_id ===
-                currentQuestion.question_id
+              (item) =>
+                item.question_id ===
+                question.question_id
                   ? {
-                      ...question,
+                      ...item,
                       selected_response:
                         isDeselecting
                           ? null
                           : responseOption,
                     }
-                  : question,
+                  : item,
             ),
         };
-      },
-    );
-
-    setSuccessMessage(
-      isDeselecting
-        ? "Answer removed."
-        : "Answer saved.",
-    );
-  } catch (error) {
-    setErrorMessage(
-      error instanceof Error
-        ? error.message
-        : "Unable to update your answer.",
-    );
-  } finally {
-    setIsSaving(false);
-  }
-}
-  function handlePrevious() {
-    setSuccessMessage("");
-
-    setCurrentQuestionIndex(
-      (currentIndex) =>
-        Math.max(
-          currentIndex - 1,
-          0,
-        ),
-    );
-  }
-
-  function handleNext() {
-    setSuccessMessage("");
-
-    if (!submission) {
-      return;
+      });
+    } catch (error) {
+      setQuestionErrors((current) => ({
+        ...current,
+        [question.question_id]:
+          error instanceof Error
+            ? error.message
+            : "Unable to save this answer.",
+      }));
+    } finally {
+      setSavingQuestionId(null);
     }
-
-    setCurrentQuestionIndex(
-      (currentIndex) =>
-        Math.min(
-          currentIndex + 1,
-          submission.questions.length - 1,
-        ),
-    );
   }
 
   async function handleSubmitSurvey() {
@@ -271,13 +358,26 @@ function PublicSurveyQuestionnairePage() {
       submission.answered_question_count !==
       submission.total_question_count
     ) {
+      const firstIncompleteSection =
+        sections.findIndex((section) =>
+          section.questions.some(
+            (question) =>
+              question.selected_response ===
+              null,
+          ),
+        );
+
+      if (firstIncompleteSection >= 0) {
+        goToSection(firstIncompleteSection);
+      }
+
       setErrorMessage(
         `Please answer all questions before submitting. ${submission.answered_question_count} of ${submission.total_question_count} are answered.`,
       );
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = await confirm(
       "Submit this survey? You will not be able to change your answers afterward.",
     );
 
@@ -370,40 +470,49 @@ function PublicSurveyQuestionnairePage() {
               ).toLocaleString()}
             </p>
           )}
-
-          <button
-            type="button"
-            onClick={() =>
-              navigate(
-                `/survey/${submission.public_code}`,
-              )
-            }
-            className="mt-8 rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700"
-          >
-            Return to survey page
-          </button>
         </section>
       </main>
     );
   }
 
+  const currentSection =
+    sections[currentSectionIndex] ?? null;
+
+  const isLastSection =
+    currentSectionIndex ===
+    sections.length - 1;
+
+  const nextSection =
+    sections[currentSectionIndex + 1] ??
+    null;
+
+  // Keep the 1-5 buttons lined up when some questions in this section
+  // offer N/A and others don't.
+  const showNotApplicableColumn =
+    currentSection?.questions.some(
+      allowsNotApplicable,
+    ) ?? false;
+
   return (
     <main className="min-h-screen bg-slate-100 px-6 py-12">
+      {dialog}
+
       <section className="mx-auto max-w-4xl">
         <header className="rounded-xl bg-white p-8 shadow">
-            <div className="mb-6">
-                <button
-                type="button"
-                onClick={() =>
+          <div className="mb-6">
+            <button
+              type="button"
+              onClick={() =>
                 navigate(
-                `/survey/${submission.public_code}`,
+                  `/survey/${submission.public_code}`,
                 )
-            }
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                    ← Back to respondent selection
-                </button>
-            </div>
+              }
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              ← Back to respondent selection
+            </button>
+          </div>
+
           <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
             SafePlus survey
           </p>
@@ -443,109 +552,252 @@ function PublicSurveyQuestionnairePage() {
             </div>
           </div>
 
-          {errorMessage && (
-            <div className="mt-6 rounded-lg bg-red-50 p-4 text-red-700">
-              {errorMessage}
-            </div>
-          )}
+          <ol className="mt-6 grid gap-2 sm:grid-cols-3">
+            {sections.map((section, index) => {
+              const answered =
+                section.questions.filter(
+                  (question) =>
+                    question.selected_response !==
+                    null,
+                ).length;
 
-          {successMessage && (
-            <div className="mt-6 rounded-lg bg-emerald-50 p-4 text-emerald-700">
-              {successMessage}
+              const isCurrent =
+                index === currentSectionIndex;
+
+              return (
+                <li key={section.name}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      goToSection(index)
+                    }
+                    aria-current={
+                      isCurrent
+                        ? "step"
+                        : undefined
+                    }
+                    className={`w-full rounded-lg border px-4 py-3 text-left transition ${
+                      isCurrent
+                        ? "border-cyan-700 bg-cyan-50"
+                        : "border-slate-200 hover:border-slate-400"
+                    }`}
+                  >
+                    <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Section {index + 1}
+                    </span>
+
+                    <span className="block font-semibold text-slate-900">
+                      {section.name}
+                    </span>
+
+                    <span className="block text-sm text-slate-500">
+                      {answered} of{" "}
+                      {section.questions.length}{" "}
+                      answered
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+
+          {errorMessage && (
+            <div
+              role="alert"
+              className="mt-6 rounded-lg bg-red-50 p-4 text-red-700"
+            >
+              {errorMessage}
             </div>
           )}
         </header>
 
-        {currentQuestion && (
-          <section className="mt-8 rounded-xl bg-white p-8 shadow">
-            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-              {currentQuestion.domain_name}
+        {currentSection && (
+          <section
+            aria-labelledby="section-heading"
+            className="mt-8 rounded-xl bg-white p-8 shadow"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2
+                id="section-heading"
+                className="text-2xl font-bold text-slate-900"
+              >
+                {currentSection.name}
+              </h2>
+
+              <p className="text-sm text-slate-500">
+                {
+                  currentSection.questions.filter(
+                    (question) =>
+                      question.selected_response !==
+                      null,
+                  ).length
+                }{" "}
+                of{" "}
+                {currentSection.questions.length}{" "}
+                answered
+              </p>
+            </div>
+
+            <p className="mt-2 text-sm text-slate-600">
+              For each statement, choose how
+              much you agree, from 1 (strongly
+              disagree) to 5 (strongly agree).
             </p>
 
-            <p className="mt-2 text-sm text-slate-500">
-              Question{" "}
-              {currentQuestionIndex + 1} of{" "}
-              {submission.total_question_count}
-              {" · "}
-              {currentQuestion.question_number}
-            </p>
+            <ol className="mt-4 divide-y divide-slate-100">
+              {currentSection.questions.map(
+                (question) => {
+                  const canAnswerNotApplicable =
+                    allowsNotApplicable(question);
 
-            <h2 className="mt-5 text-2xl font-bold leading-relaxed text-slate-900">
-              {currentQuestion.question_text}
-            </h2>
+                  const isSaving =
+                    savingQuestionId ===
+                    question.question_id;
 
-            <div className="mt-8 space-y-3">
-              {availableOptions.map(
-                (option) => {
-                  const isSelected =
-                    currentQuestion.selected_response ===
-                    option;
+                  const promptId = `question-${question.question_id}`;
 
                   return (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() =>
-                        handleSelectAnswer(
-                          option,
-                        )
-                      }
-                      disabled={isSaving}
-                      className={`w-full rounded-lg border p-4 text-left font-medium transition ${
-                        isSelected
-                          ? "border-cyan-700 bg-cyan-50 text-cyan-900"
-                          : "border-slate-200 bg-white text-slate-800 hover:border-slate-400"
-                      } disabled:opacity-60`}
+                    <li
+                      key={question.question_id}
+                      className="py-6"
                     >
-                      {option}
-                    </button>
+                      <p
+                        id={promptId}
+                        className="text-lg font-semibold leading-relaxed text-slate-900"
+                      >
+                        <span className="mr-2 text-slate-500">
+                          {
+                            question.question_number
+                          }
+                        </span>
+                        {question.question_text}
+                      </p>
+
+                      <div
+                        role="radiogroup"
+                        aria-labelledby={promptId}
+                        className={`mt-4 grid gap-2 ${
+                          showNotApplicableColumn
+                            ? "grid-cols-6"
+                            : "grid-cols-5"
+                        }`}
+                      >
+                        {showNotApplicableColumn &&
+                          (canAnswerNotApplicable ? (
+                            <div className="border-r border-slate-200 pr-2">
+                              <AnswerChoice
+                                value="N/A"
+                                label="Not applicable"
+                                isSelected={
+                                  question.selected_response ===
+                                  "N/A"
+                                }
+                                isDisabled={
+                                  isSaving
+                                }
+                                isNotApplicable
+                                onSelect={() =>
+                                  void handleSelectAnswer(
+                                    question,
+                                    "N/A",
+                                  )
+                                }
+                              />
+                            </div>
+                          ) : (
+                            <span aria-hidden="true" />
+                          ))}
+
+                        {scaleOptions.map(
+                          (scaleOption) => (
+                            <AnswerChoice
+                              key={
+                                scaleOption.option
+                              }
+                              value={String(
+                                scaleOption.value,
+                              )}
+                              label={
+                                scaleOption.label
+                              }
+                              isSelected={
+                                question.selected_response ===
+                                scaleOption.option
+                              }
+                              isDisabled={isSaving}
+                              onSelect={() =>
+                                void handleSelectAnswer(
+                                  question,
+                                  scaleOption.option,
+                                )
+                              }
+                            />
+                          ),
+                        )}
+                      </div>
+
+                      {questionErrors[
+                        question.question_id
+                      ] && (
+                        <p
+                          role="alert"
+                          className="mt-3 text-sm text-red-700"
+                        >
+                          {
+                            questionErrors[
+                              question.question_id
+                            ]
+                          }
+                        </p>
+                      )}
+                    </li>
                   );
                 },
               )}
-            </div>
+            </ol>
 
-            <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-6">
               <button
                 type="button"
-                onClick={handlePrevious}
+                onClick={() =>
+                  goToSection(
+                    currentSectionIndex - 1,
+                  )
+                }
                 disabled={
-                  currentQuestionIndex === 0
+                  currentSectionIndex === 0
                 }
                 className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700 disabled:opacity-40"
               >
-                Previous
+                ← Previous section
               </button>
 
-              <div className="flex flex-wrap gap-3">
-                {currentQuestionIndex <
-                submission.questions.length -
-                  1 ? (
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    className="rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white"
-                  >
-                    Next question
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={
-                      handleSubmitSurvey
-                    }
-                    disabled={
-                      isSubmitting ||
-                      submission.answered_question_count !==
-                        submission.total_question_count
-                    }
-                    className="rounded-lg bg-emerald-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
-                  >
-                    {isSubmitting
-                      ? "Submitting..."
-                      : "Submit survey"}
-                  </button>
-                )}
-              </div>
+              {isLastSection ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleSubmitSurvey()
+                  }
+                  disabled={isSubmitting}
+                  className="rounded-lg bg-emerald-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
+                >
+                  {isSubmitting
+                    ? "Submitting..."
+                    : "Submit survey"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() =>
+                    goToSection(
+                      currentSectionIndex + 1,
+                    )
+                  }
+                  className="rounded-lg bg-slate-900 px-5 py-3 font-semibold text-white"
+                >
+                  Next: {nextSection?.name} →
+                </button>
+              )}
             </div>
           </section>
         )}

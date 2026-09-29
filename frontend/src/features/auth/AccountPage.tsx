@@ -6,59 +6,280 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import {
-  getAssessmentProgress,
-  type AssessmentProgress,
-} from "../../api/assessmentProgressApi";
-import {
+  calculateAssessmentScores,
   createAssessment,
-  deleteAssessment,
   getAssessments,
   type Assessment,
+  type AssessmentScoringResult,
 } from "../../api/assessmentsApi";
 import {
   getCurrentOrganisation,
+  resendVerification,
   type Organisation,
 } from "../../api/authApi";
+import MaturityLadder from "../../components/MaturityLadder";
 import {
-  getSubmissionSummary,
-  type SubmissionSummary,
-} from "../../api/submissionSummaryApi";
+  DEVELOPING_MAX,
+  LEADING_MIN,
+  SCALE_MAX,
+  SCALE_MIN,
+  getDomainName,
+  getMaturityBadgeClasses,
+  getNextLevel,
+} from "../../components/maturity";
 
-type AssessmentDashboardData = {
-  progress: AssessmentProgress | null;
-  submissionSummary: SubmissionSummary | null;
-  isLoading: boolean;
-  errorMessage: string;
-};
-
-function getStatusClasses(
-  status: string,
-): string {
-  switch (status) {
-    case "completed":
-      return "bg-emerald-100 text-emerald-800";
-
-    case "in_progress":
-      return "bg-cyan-100 text-cyan-800";
-
-    default:
-      return "bg-amber-100 text-amber-800";
-  }
+// Only completed assessments count towards where the organisation
+// stands; open ones never carry a score.
+function getCompletedHistory(
+  assessmentList: Assessment[],
+): Assessment[] {
+  return assessmentList
+    .filter(
+      (assessment) =>
+        assessment.status === "completed" &&
+        assessment.completed_at !== null &&
+        assessment.overall_combined_mean !== null,
+    )
+    .sort(
+      (first, second) =>
+        new Date(
+          first.completed_at as string,
+        ).getTime() -
+        new Date(
+          second.completed_at as string,
+        ).getTime(),
+    );
 }
 
-function getStatusLabel(
-  status: string,
+function formatShortDate(
+  value: string | null,
 ): string {
-  switch (status) {
-    case "completed":
-      return "Completed";
-
-    case "in_progress":
-      return "In progress";
-
-    default:
-      return "Draft";
+  if (!value) {
+    return "";
   }
+
+  return new Date(value).toLocaleDateString(
+    undefined,
+    {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    },
+  );
+}
+
+function describeScoreChange(
+  current: number,
+  previous: number,
+): string {
+  const difference =
+    Math.round((current - previous) * 100) /
+    100;
+
+  if (difference === 0) {
+    return "No change";
+  }
+
+  return `${difference > 0 ? "Up" : "Down"} ${Math.abs(
+    difference,
+  ).toFixed(2)}`;
+}
+
+// Open assessments first (newest first), then completed ones with the
+// most recently completed at the top.
+function sortAssessmentsForTable(
+  assessmentList: Assessment[],
+): Assessment[] {
+  const openAssessments = assessmentList
+    .filter(
+      (assessment) =>
+        assessment.status !== "completed",
+    )
+    .sort(
+      (first, second) =>
+        new Date(
+          second.created_at,
+        ).getTime() -
+        new Date(
+          first.created_at,
+        ).getTime(),
+    );
+
+  const completedAssessments = [
+    ...getCompletedHistory(assessmentList),
+  ].reverse();
+
+  return [
+    ...openAssessments,
+    ...completedAssessments,
+  ];
+}
+
+type TrendPoint = {
+  id: number;
+  label: string;
+  score: number;
+};
+
+function ScoreTrend({
+  points,
+}: {
+  points: TrendPoint[];
+}) {
+  if (points.length < 2) {
+    return (
+      <p className="mt-4 text-sm text-slate-600">
+        The trend appears once a second
+        assessment is completed.
+      </p>
+    );
+  }
+
+  const width = 560;
+  const height = 230;
+  const left = 56;
+  const right = 104;
+  const top = 20;
+  const bottom = 40;
+
+  function x(index: number): number {
+    return (
+      left +
+      (index * (width - left - right)) /
+        (points.length - 1)
+    );
+  }
+
+  function y(score: number): number {
+    return (
+      top +
+      ((SCALE_MAX - score) /
+        (SCALE_MAX - SCALE_MIN)) *
+        (height - top - bottom)
+    );
+  }
+
+  const bands = [
+    {
+      name: "Leading",
+      from: LEADING_MIN,
+      to: SCALE_MAX,
+      fill: "#155e75",
+      opacity: 0.18,
+    },
+    {
+      name: "Performing",
+      from: DEVELOPING_MAX,
+      to: LEADING_MIN,
+      fill: "#a5f3fc",
+      opacity: 0.45,
+    },
+    {
+      name: "Developing",
+      from: SCALE_MIN,
+      to: DEVELOPING_MAX,
+      fill: "#ecfeff",
+      opacity: 1,
+    },
+  ];
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label={`Overall score by completed assessment: ${points
+        .map(
+          (point) =>
+            `${point.label} ${point.score.toFixed(2)}`,
+        )
+        .join(", ")}`}
+      className="mt-4 h-auto w-full"
+    >
+      {bands.map((band) => (
+        <g key={band.name}>
+          <rect
+            x={left}
+            y={y(band.to)}
+            width={width - left - right}
+            height={y(band.from) - y(band.to)}
+            fill={band.fill}
+            fillOpacity={band.opacity}
+          />
+
+          <text
+            x={width - right + 8}
+            y={(y(band.from) + y(band.to)) / 2 + 4}
+            fontSize={11}
+            fill="#475569"
+          >
+            {band.name}
+          </text>
+        </g>
+      ))}
+
+      {[
+        SCALE_MIN,
+        DEVELOPING_MAX,
+        LEADING_MIN,
+        SCALE_MAX,
+      ].map((tick) => (
+        <text
+          key={tick}
+          x={left - 8}
+          y={y(tick) + 4}
+          fontSize={11}
+          textAnchor="end"
+          fill="#64748b"
+        >
+          {tick.toFixed(1)}
+        </text>
+      ))}
+
+      <polyline
+        points={points
+          .map(
+            (point, index) =>
+              `${x(index)},${y(point.score)}`,
+          )
+          .join(" ")}
+        fill="none"
+        stroke="#0e7490"
+        strokeWidth={2.5}
+      />
+
+      {points.map((point, index) => (
+        <g key={point.id}>
+          <circle
+            cx={x(index)}
+            cy={y(point.score)}
+            r={4.5}
+            fill="#0e7490"
+          />
+
+          <text
+            x={x(index)}
+            y={y(point.score) - 10}
+            fontSize={12}
+            fontWeight={700}
+            textAnchor="middle"
+            fill="#0f172a"
+          >
+            {point.score.toFixed(2)}
+          </text>
+
+          <text
+            x={x(index)}
+            y={height - 12}
+            fontSize={11}
+            textAnchor="middle"
+            fill="#64748b"
+          >
+            {point.label}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
 }
 
 function AccountPage() {
@@ -75,13 +296,6 @@ function AccountPage() {
   ] = useState<Assessment[]>([]);
 
   const [
-    dashboardData,
-    setDashboardData,
-  ] = useState<
-    Record<number, AssessmentDashboardData>
-  >({});
-
-  const [
     assessmentName,
     setAssessmentName,
   ] = useState("");
@@ -90,11 +304,6 @@ function AccountPage() {
     showCreateForm,
     setShowCreateForm,
   ] = useState(false);
-
-  const [
-    deletingAssessmentId,
-    setDeletingAssessmentId,
-  ] = useState<number | null>(null);
 
   const [isLoading, setIsLoading] =
     useState(true);
@@ -105,88 +314,43 @@ function AccountPage() {
   ] = useState(false);
 
   const [
-    isRefreshing,
-    setIsRefreshing,
-  ] = useState(false);
-
-  const [
     errorMessage,
     setErrorMessage,
   ] = useState("");
 
-  async function loadAssessmentDashboardData(
-    assessmentList: Assessment[],
-    accessToken: string,
-  ) {
-    const loadingState =
-      assessmentList.reduce<
-        Record<number, AssessmentDashboardData>
-      >((currentState, assessment) => {
-        currentState[assessment.id] = {
-          progress: null,
-          submissionSummary: null,
-          isLoading: true,
-          errorMessage: "",
-        };
+  const [
+    verificationToken,
+    setVerificationToken,
+  ] = useState("");
 
-        return currentState;
-      }, {});
+  const [
+    isSendingVerification,
+    setIsSendingVerification,
+  ] = useState(false);
 
-    setDashboardData(loadingState);
+  const [
+    verificationError,
+    setVerificationError,
+  ] = useState("");
 
-    await Promise.all(
-      assessmentList.map(
-        async (assessment) => {
-          try {
-            const [
-              progress,
-              submissionSummary,
-            ] = await Promise.all([
-              getAssessmentProgress(
-                assessment.id,
-                accessToken,
-              ),
-              getSubmissionSummary(
-                assessment.id,
-                accessToken,
-              ),
-            ]);
+  const [
+    latestScores,
+    setLatestScores,
+  ] = useState<AssessmentScoringResult | null>(
+    null,
+  );
 
-            setDashboardData(
-              (currentData) => ({
-                ...currentData,
-                [assessment.id]: {
-                  progress,
-                  submissionSummary,
-                  isLoading: false,
-                  errorMessage: "",
-                },
-              }),
-            );
-          } catch (error) {
-            setDashboardData(
-              (currentData) => ({
-                ...currentData,
-                [assessment.id]: {
-                  progress: null,
-                  submissionSummary: null,
-                  isLoading: false,
-                  errorMessage:
-                    error instanceof Error
-                      ? error.message
-                      : "Unable to load assessment details.",
-                },
-              }),
-            );
-          }
-        },
-      ),
-    );
-  }
+  const [
+    latestScoresError,
+    setLatestScoresError,
+  ] = useState("");
 
-  async function loadAccount(
-    showRefreshState = false,
-  ) {
+  const [
+    isLoadingLatestScores,
+    setIsLoadingLatestScores,
+  ] = useState(false);
+
+  async function handleSendVerificationLink() {
     const accessToken =
       localStorage.getItem(
         "safeplus_access_token",
@@ -200,91 +364,154 @@ function AccountPage() {
     }
 
     try {
-      if (showRefreshState) {
-        setIsRefreshing(true);
-      }
+      setIsSendingVerification(true);
+      setVerificationError("");
 
-      setErrorMessage("");
-
-      const [
-        account,
-        existingAssessments,
-      ] = await Promise.all([
-        getCurrentOrganisation(
-          accessToken,
-        ),
-        getAssessments(accessToken),
-      ]);
-
-      setOrganisation(account);
-      setAssessments(
-        existingAssessments,
-      );
-
-      await loadAssessmentDashboardData(
-        existingAssessments,
+      const result = await resendVerification(
         accessToken,
       );
-    } catch (error) {
-      localStorage.removeItem(
-        "safeplus_access_token",
-      );
 
-      setErrorMessage(
+      setVerificationToken(
+        result.verification_token,
+      );
+    } catch (error) {
+      setVerificationError(
         error instanceof Error
           ? error.message
-          : "Your session could not be verified.",
+          : "Unable to generate a verification link.",
       );
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      setIsSendingVerification(false);
     }
   }
 
+  // Loaded inside the effect so state is only set after the requests resolve.
   useEffect(() => {
+    // Domain scores for the current standing come from the most
+    // recently completed assessment only.
+    async function loadLatestScores(
+      assessmentList: Assessment[],
+      accessToken: string,
+    ) {
+      const history =
+        getCompletedHistory(assessmentList);
+
+      const latest =
+        history[history.length - 1];
+
+      if (!latest) {
+        setLatestScores(null);
+        return;
+      }
+
+      try {
+        setIsLoadingLatestScores(true);
+        setLatestScoresError("");
+
+        setLatestScores(
+          await calculateAssessmentScores(
+            latest.id,
+            accessToken,
+          ),
+        );
+      } catch (error) {
+        setLatestScores(null);
+        setLatestScoresError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load domain scores.",
+        );
+      } finally {
+        setIsLoadingLatestScores(false);
+      }
+    }
+
+    async function loadAccount() {
+      const accessToken =
+        localStorage.getItem(
+          "safeplus_access_token",
+        );
+
+      if (!accessToken) {
+        navigate("/login", {
+          replace: true,
+        });
+        return;
+      }
+
+      try {
+        const [
+          account,
+          existingAssessments,
+        ] = await Promise.all([
+          getCurrentOrganisation(
+            accessToken,
+          ),
+          getAssessments(accessToken),
+        ]);
+
+        setOrganisation(account);
+        setAssessments(
+          existingAssessments,
+        );
+
+        await loadLatestScores(
+          existingAssessments,
+          accessToken,
+        );
+      } catch (error) {
+        localStorage.removeItem(
+          "safeplus_access_token",
+        );
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Your session could not be verified.",
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
     void loadAccount();
-  }, []);
+  }, [navigate]);
 
-  const totalSubmitted =
-    useMemo(
-      () =>
-        Object.values(
-          dashboardData,
-        ).reduce(
-          (total, data) =>
-            total +
-            (data.submissionSummary
-              ?.submitted_total ?? 0),
-          0,
-        ),
-      [dashboardData],
-    );
+  const completedHistory = useMemo(
+    () =>
+      getCompletedHistory(assessments),
+    [assessments],
+  );
 
-  const totalInProgressSessions =
-    useMemo(
-      () =>
-        Object.values(
-          dashboardData,
-        ).reduce(
-          (total, data) =>
-            total +
-            (data.submissionSummary
-              ?.in_progress_total ?? 0),
-          0,
-        ),
-      [dashboardData],
-    );
+  const openAssessmentCount = useMemo(
+    () =>
+      assessments.filter(
+        (assessment) =>
+          assessment.status !== "completed",
+      ).length,
+    [assessments],
+  );
 
-  const completedAssessmentCount =
-    useMemo(
-      () =>
-        assessments.filter(
+  // The header button opens the most recently created assessment that
+  // is still open; with none open it offers a new assessment instead.
+  const openAssessment = useMemo(
+    () =>
+      assessments
+        .filter(
           (assessment) =>
-            assessment.status ===
-            "completed",
-        ).length,
-      [assessments],
-    );
+            assessment.status !== "completed",
+        )
+        .sort(
+          (first, second) =>
+            new Date(
+              second.created_at,
+            ).getTime() -
+            new Date(
+              first.created_at,
+            ).getTime(),
+        )[0] ?? null,
+    [assessments],
+  );
 
   async function handleCreateAssessment(
     event: React.FormEvent<HTMLFormElement>,
@@ -323,70 +550,13 @@ function AccountPage() {
           accessToken,
         );
 
-      setAssessments(
-        (currentAssessments) => [
-          newAssessment,
-          ...currentAssessments,
-        ],
-      );
-
       setAssessmentName("");
       setShowCreateForm(false);
 
-      setDashboardData(
-        (currentData) => ({
-          ...currentData,
-          [newAssessment.id]: {
-            progress: null,
-            submissionSummary: null,
-            isLoading: true,
-            errorMessage: "",
-          },
-        }),
+      // Open the new assessment so its survey link can be shared.
+      navigate(
+        `/assessments/${newAssessment.id}`,
       );
-
-      try {
-        const [
-          progress,
-          submissionSummary,
-        ] = await Promise.all([
-          getAssessmentProgress(
-            newAssessment.id,
-            accessToken,
-          ),
-          getSubmissionSummary(
-            newAssessment.id,
-            accessToken,
-          ),
-        ]);
-
-        setDashboardData(
-          (currentData) => ({
-            ...currentData,
-            [newAssessment.id]: {
-              progress,
-              submissionSummary,
-              isLoading: false,
-              errorMessage: "",
-            },
-          }),
-        );
-      } catch (error) {
-        setDashboardData(
-          (currentData) => ({
-            ...currentData,
-            [newAssessment.id]: {
-              progress: null,
-              submissionSummary: null,
-              isLoading: false,
-              errorMessage:
-                error instanceof Error
-                  ? error.message
-                  : "Unable to load assessment details.",
-            },
-          }),
-        );
-      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -398,83 +568,9 @@ function AccountPage() {
     }
   }
 
-  async function handleDeleteAssessment(
-    assessment: Assessment,
-  ) {
-    const confirmed = window.confirm(
-      `Delete "${assessment.name}"?\n\nThis will permanently remove its survey links, responses, scores, and AI analysis. This action cannot be undone.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    const accessToken =
-      localStorage.getItem(
-        "safeplus_access_token",
-      );
-
-    if (!accessToken) {
-      navigate("/login", {
-        replace: true,
-      });
-      return;
-    }
-
-    try {
-      setDeletingAssessmentId(
-        assessment.id,
-      );
-      setErrorMessage("");
-
-      await deleteAssessment(
-        assessment.id,
-        accessToken,
-      );
-
-      setAssessments(
-        (currentAssessments) =>
-          currentAssessments.filter(
-            (item) =>
-              item.id !== assessment.id,
-          ),
-      );
-
-      setDashboardData(
-        (currentData) => {
-          const updatedData = {
-            ...currentData,
-          };
-
-          delete updatedData[
-            assessment.id
-          ];
-
-          return updatedData;
-        },
-      );
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to delete the assessment.",
-      );
-    } finally {
-      setDeletingAssessmentId(null);
-    }
-  }
-
-  function handleLogout() {
-    localStorage.removeItem(
-      "safeplus_access_token",
-    );
-
-    navigate("/login");
-  }
-
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-slate-100 p-8">
+      <main>
         <p className="text-slate-700">
           Loading dashboard...
         </p>
@@ -487,7 +583,7 @@ function AccountPage() {
     !organisation
   ) {
     return (
-      <main className="min-h-screen bg-slate-100 p-8">
+      <main>
         <section className="mx-auto max-w-3xl rounded-xl bg-white p-8 shadow">
           <h1 className="text-2xl font-bold text-red-700">
             Session unavailable
@@ -515,103 +611,136 @@ function AccountPage() {
     return null;
   }
 
-  return (
-    <main className="min-h-screen bg-slate-100 px-6 py-12">
-      <section className="mx-auto max-w-6xl">
-        <header className="rounded-xl bg-white p-8 shadow">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-                SafePlus dashboard
-              </p>
+  const latestCompleted =
+    completedHistory.length > 0
+      ? completedHistory[
+          completedHistory.length - 1
+        ]
+      : null;
 
-              <h1 className="mt-2 text-3xl font-bold text-slate-900">
+  const latestScore = latestCompleted
+    ? Number(
+        latestCompleted.overall_combined_mean,
+      )
+    : 0;
+
+  const previousCompleted =
+    completedHistory.length > 1
+      ? completedHistory[
+          completedHistory.length - 2
+        ]
+      : null;
+
+  const firstCompleted =
+    completedHistory.length > 2
+      ? completedHistory[0]
+      : null;
+
+  const nextLevel = latestCompleted
+    ? getNextLevel(latestScore)
+    : null;
+
+  let lastLevelMove: {
+    from: string;
+    to: string;
+    name: string;
+  } | null = null;
+
+  for (
+    let index = 1;
+    index < completedHistory.length;
+    index += 1
+  ) {
+    const previous =
+      completedHistory[index - 1];
+    const current = completedHistory[index];
+
+    if (
+      previous.overall_maturity_label !==
+      current.overall_maturity_label
+    ) {
+      lastLevelMove = {
+        from:
+          previous.overall_maturity_label ??
+          "",
+        to:
+          current.overall_maturity_label ?? "",
+        name: current.name,
+      };
+    }
+  }
+
+  const trendPoints = completedHistory.map(
+    (assessment) => ({
+      id: assessment.id,
+      label: formatShortDate(
+        assessment.completed_at,
+      ),
+      score: Number(
+        assessment.overall_combined_mean,
+      ),
+    }),
+  );
+
+  const latestDomainScores = [
+    ...(latestScores?.domain_scores ?? []),
+  ].sort(
+    (first, second) =>
+      first.domain_id - second.domain_id,
+  );
+
+  return (
+    <main>
+      <section>
+        <header className="rounded-xl bg-white p-8 shadow">
+          <div className="flex flex-wrap items-center justify-between gap-6">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900">
                 {organisation.name}
               </h1>
 
-              <p className="mt-3 text-slate-600">
-                Manage assessments,
-                respondent participation,
-                progress, and results.
+              <p className="mt-2 text-slate-600">
+                {organisation.category}
               </p>
             </div>
 
-            <div className="text-sm text-slate-600">
-            <p>
-              {organisation.email}
-            </p>
-
-            <p className="mt-1">
-              Sector:{" "}
-              <span className="font-semibold text-slate-800">
-                {organisation.category}
-              </span>
-            </p>
-
-            <p className="mt-1 font-semibold">
-              {organisation.is_verified
-                ? "Verified organisation"
-                : "Organisation not verified"}
-            </p>
-          </div>
-          </div>
-
-          {errorMessage && (
-            <div className="mt-6 rounded-lg bg-red-50 p-4 text-red-700">
-              {errorMessage}
-            </div>
-          )}
-
-          <div className="mt-8 flex flex-wrap gap-4">
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreateForm(
-                  (currentValue) =>
-                    !currentValue,
-                );
-                setErrorMessage("");
-              }}
-              className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white"
-            >
-              {showCreateForm
-                ? "Cancel new assessment"
-                : "Start new assessment"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                void loadAccount(true)
-              }
-              disabled={isRefreshing}
-              className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700 disabled:opacity-60"
-            >
-              {isRefreshing
-                ? "Refreshing..."
-                : "Refresh dashboard"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/questions")
-              }
-              className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700"
-            >
-              View question library
-            </button>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="rounded-lg border border-slate-300 px-5 py-3 font-semibold text-slate-700"
-            >
-              Log out
-            </button>
+            {openAssessment ? (
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    `/assessments/${openAssessment.id}/results`,
+                  )
+                }
+                className="rounded-lg bg-cyan-700 px-5 py-3 font-semibold text-white hover:bg-cyan-800"
+              >
+                View assessment in progress
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(
+                    (currentValue) =>
+                      !currentValue,
+                  );
+                  setErrorMessage("");
+                }}
+                aria-expanded={showCreateForm}
+                className={`rounded-lg px-5 py-3 font-semibold ${
+                  showCreateForm
+                    ? "border border-slate-300 text-slate-700 hover:bg-slate-50"
+                    : "bg-cyan-700 text-white hover:bg-cyan-800"
+                }`}
+              >
+                {showCreateForm
+                  ? "Cancel"
+                  : "New assessment"}
+              </button>
+            )}
           </div>
 
-          {showCreateForm && (
+          {showCreateForm && !openAssessment && (
             <form
               onSubmit={
                 handleCreateAssessment
@@ -622,12 +751,12 @@ function AccountPage() {
                 htmlFor="assessment-name"
                 className="block text-sm font-semibold text-slate-900"
               >
-                Assessment name
+                Name
               </label>
 
               <p className="mt-1 text-sm text-slate-600">
-                Use a clear name that helps
-                identify the assessment later.
+                Use a clear name you'll
+                recognise later.
               </p>
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row">
@@ -655,329 +784,462 @@ function AccountPage() {
                 >
                   {isCreatingAssessment
                     ? "Creating..."
-                    : "Create assessment"}
+                    : "Create"}
                 </button>
               </div>
+
+              {errorMessage && (
+                <p className="mt-3 text-sm text-red-700">
+                  {errorMessage}
+                </p>
+              )}
             </form>
+          )}
+
+          {errorMessage && !showCreateForm && (
+            <div className="mt-6 rounded-lg bg-red-50 p-4 text-red-700">
+              {errorMessage}
+            </div>
           )}
         </header>
 
-        <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <article className="rounded-xl bg-white p-6 shadow">
-            <p className="text-sm font-semibold text-slate-500">
-              Total assessments
+        {/* Verification status itself is shown in the sidebar; this
+            stays only while a verification link is still needed. */}
+        {!organisation.is_verified && (
+          <section className="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-5 shadow">
+            <p className="font-semibold text-amber-900">
+              Verify your organisation
             </p>
 
-            <p className="mt-2 text-3xl font-bold text-slate-900">
-              {assessments.length}
-            </p>
-          </article>
-
-          <article className="rounded-xl bg-white p-6 shadow">
-            <p className="text-sm font-semibold text-slate-500">
-              Completed assessments
+            <p className="mt-1 text-sm text-amber-800">
+              No email provider is configured
+              for this prototype, so
+              verification links are shown
+              here directly instead of being
+              emailed.
             </p>
 
-            <p className="mt-2 text-3xl font-bold text-emerald-700">
-              {
-                completedAssessmentCount
+            <button
+              type="button"
+              onClick={
+                handleSendVerificationLink
               }
-            </p>
-          </article>
-
-          <article className="rounded-xl bg-white p-6 shadow">
-            <p className="text-sm font-semibold text-slate-500">
-              Submitted surveys
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-cyan-700">
-              {totalSubmitted}
-            </p>
-          </article>
-
-          <article className="rounded-xl bg-white p-6 shadow">
-            <p className="text-sm font-semibold text-slate-500">
-              Unfinished sessions
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-amber-700">
-              {
-                totalInProgressSessions
+              disabled={
+                isSendingVerification
               }
-            </p>
-          </article>
-        </section>
+              className="mt-3 rounded-lg bg-amber-700 px-4 py-2 font-semibold text-white disabled:opacity-60"
+            >
+              {isSendingVerification
+                ? "Generating link..."
+                : "Get verification link"}
+            </button>
 
-        <section className="mt-8 rounded-xl bg-white p-8 shadow">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">
-                Assessments
+            {verificationError && (
+              <p className="mt-3 text-sm text-red-700">
+                {verificationError}
               </p>
+            )}
 
-              <h2 className="mt-1 text-2xl font-bold text-slate-900">
-                Assessment dashboard
-              </h2>
+            {verificationToken && (
+              <div className="mt-3 rounded-lg bg-white p-3">
+                <p className="text-sm text-slate-600">
+                  Verification link (valid
+                  24 hours):
+                </p>
 
-              <p className="mt-2 text-slate-600">
-                Review progress and open the
-                next action for each
-                assessment.
-              </p>
-            </div>
+                <a
+                  href={`/verify?token=${encodeURIComponent(
+                    verificationToken,
+                  )}`}
+                  className="mt-1 block break-all text-sm font-semibold text-cyan-700"
+                >
+                  {`${window.location.origin}/verify?token=${verificationToken}`}
+                </a>
+              </div>
+            )}
+          </section>
+        )}
 
-            <span className="text-sm text-slate-500">
-              {assessments.length} total
-            </span>
-          </div>
+        {/* Where the organisation sits now and how that has changed.
+            Detail about a single assessment lives on its results page. */}
+        <section
+          aria-labelledby="standing-heading"
+          className="mt-8"
+        >
+          <h2
+            id="standing-heading"
+            className="sr-only"
+          >
+            Where you stand
+          </h2>
 
-          {assessments.length === 0 ? (
-            <div className="mt-8 rounded-lg border border-dashed border-slate-300 p-8 text-center">
-              <h3 className="font-semibold text-slate-900">
-                No assessments yet
+          {latestCompleted ? (
+            <>
+              <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
+                <article className="flex flex-col justify-between rounded-xl bg-white p-6 shadow">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">
+                      Current maturity
+                    </p>
+
+                    <p className="mt-2 text-4xl font-bold text-cyan-800">
+                      {
+                        latestCompleted.overall_maturity_label
+                      }
+                    </p>
+
+                    <p className="mt-2 text-slate-600">
+                      <span className="text-2xl font-bold text-slate-900">
+                        {latestScore.toFixed(2)}
+                      </span>{" "}
+                      out of 5
+                    </p>
+                  </div>
+
+                  <p className="mt-6 text-sm leading-6 text-slate-500">
+                    From {latestCompleted.name},
+                    completed{" "}
+                    {formatShortDate(
+                      latestCompleted.completed_at,
+                    )}
+                    . This only changes when an
+                    assessment is completed
+                    {openAssessmentCount > 0
+                      ? `, so ${
+                          openAssessmentCount === 1
+                            ? "the open assessment is"
+                            : `${openAssessmentCount} open assessments are`
+                        } not counted yet.`
+                      : "."}
+                  </p>
+                </article>
+
+                <article className="rounded-xl bg-white p-6 shadow">
+                  <p className="text-sm font-semibold text-slate-500">
+                    By domain
+                  </p>
+
+                  {isLoadingLatestScores ? (
+                    <p className="mt-4 text-sm text-slate-500">
+                      Loading domain scores...
+                    </p>
+                  ) : latestDomainScores.length >
+                    0 ? (
+                    <div className="mt-4 space-y-6">
+                      {latestDomainScores.map(
+                        (domainScore) => (
+                          <MaturityLadder
+                            key={
+                              domainScore.domain_id
+                            }
+                            label={getDomainName(
+                              domainScore.domain_id,
+                            )}
+                            score={Number(
+                              domainScore.combined_mean,
+                            )}
+                          />
+                        ),
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-sm text-slate-600">
+                      {latestScoresError ||
+                        "Domain scores are not available."}
+                    </p>
+                  )}
+                </article>
+              </div>
+
+              <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+                <article className="rounded-xl bg-white p-6 shadow">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Overall score over time
+                  </h3>
+
+                  <ScoreTrend
+                    points={trendPoints}
+                  />
+                </article>
+
+                <article className="rounded-xl bg-white p-6 shadow">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    What has changed
+                  </h3>
+
+                  <ul className="mt-4 divide-y divide-slate-100 text-slate-700">
+                    {previousCompleted ? (
+                      <li className="py-3 first:pt-0">
+                        <span className="text-lg font-bold text-slate-900">
+                          {describeScoreChange(
+                            latestScore,
+                            Number(
+                              previousCompleted.overall_combined_mean,
+                            ),
+                          )}
+                        </span>{" "}
+                        since {previousCompleted.name}
+                      </li>
+                    ) : (
+                      <li className="py-3 first:pt-0">
+                        Change appears once a
+                        second assessment is
+                        completed.
+                      </li>
+                    )}
+
+                    {firstCompleted && (
+                      <li className="py-3">
+                        <span className="text-lg font-bold text-slate-900">
+                          {describeScoreChange(
+                            latestScore,
+                            Number(
+                              firstCompleted.overall_combined_mean,
+                            ),
+                          )}
+                        </span>{" "}
+                        since the first
+                        assessment,{" "}
+                        {firstCompleted.name}
+                      </li>
+                    )}
+
+                    {previousCompleted && (
+                      <li className="py-3">
+                        {lastLevelMove ? (
+                          <>
+                            Moved from{" "}
+                            <span className="font-bold text-slate-900">
+                              {lastLevelMove.from}
+                            </span>{" "}
+                            to{" "}
+                            <span className="font-bold text-slate-900">
+                              {lastLevelMove.to}
+                            </span>{" "}
+                            at {lastLevelMove.name}
+                          </>
+                        ) : (
+                          <>
+                            Has stayed{" "}
+                            <span className="font-bold text-slate-900">
+                              {
+                                latestCompleted.overall_maturity_label
+                              }
+                            </span>{" "}
+                            across all{" "}
+                            {
+                              completedHistory.length
+                            }{" "}
+                            completed assessments
+                          </>
+                        )}
+                      </li>
+                    )}
+
+                    <li className="py-3">
+                      {nextLevel ? (
+                        <>
+                          <span className="text-lg font-bold text-slate-900">
+                            {nextLevel.gap.toFixed(
+                              2,
+                            )}
+                          </span>{" "}
+                          below {nextLevel.name}
+                        </>
+                      ) : (
+                        "At the highest level"
+                      )}
+                    </li>
+                  </ul>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigate(
+                        `/assessments/${latestCompleted.id}/results`,
+                      )
+                    }
+                    className="mt-2 text-sm font-semibold text-cyan-700 underline hover:text-cyan-900"
+                  >
+                    See why the latest
+                    assessment landed here
+                  </button>
+                </article>
+              </div>
+            </>
+          ) : (
+            <article className="rounded-xl bg-white p-6 shadow">
+              <h3 className="text-lg font-bold text-slate-900">
+                Current maturity
               </h3>
 
               <p className="mt-2 text-slate-600">
-                Start your first assessment
-                to begin recording SafePlus
-                results.
+                Your maturity appears here once
+                your first assessment is
+                completed. While an assessment
+                is open, only participation is
+                shown.
               </p>
-            </div>
+            </article>
+          )}
+        </section>
+
+        <section
+          aria-labelledby="assessments-heading"
+          className="mt-8 rounded-xl bg-white p-8 shadow"
+        >
+          <h2
+            id="assessments-heading"
+            className="text-xl font-bold text-slate-900"
+          >
+            Assessments
+          </h2>
+
+          {assessments.length === 0 ? (
+            <p className="mt-4 text-slate-600">
+              No assessments yet. Use New
+              assessment above to start one.
+            </p>
           ) : (
-            <div className="mt-8 space-y-6">
-              {assessments.map(
-                (assessment) => {
-                  const details =
-                    dashboardData[
-                      assessment.id
-                    ];
-
-                  const progress =
-                    details?.progress;
-
-                  const summary =
-                    details
-                      ?.submissionSummary;
-
-                  const progressPercentage =
-                    progress
-                      ?.overall_progress_percentage ??
-                    0;
-
-                  const isDeleting =
-                    deletingAssessmentId ===
-                    assessment.id;
-
-                  return (
-                    <article
-                      key={assessment.id}
-                      className="rounded-xl border border-slate-200 p-6"
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[40rem] text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 text-sm text-slate-500">
+                    <th
+                      scope="col"
+                      className="py-3 pr-4 font-semibold"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                          <p className="text-xl font-bold text-slate-900">
-                            {assessment.name}
-                          </p>
+                      Completed
+                    </th>
 
-                          <p className="mt-1 text-sm font-semibold text-cyan-700">
-                            Assessment{" "}
-                            {
-                              assessment.organisation_assessment_number
-                            }
-                          </p>
+                    <th
+                      scope="col"
+                      className="py-3 pr-4 font-semibold"
+                    >
+                      Assessment
+                    </th>
 
-                          <p className="mt-1 text-sm text-slate-500">
-                            Created{" "}
-                            {new Date(
-                              assessment.created_at,
-                            ).toLocaleString()}
-                          </p>
-                        </div>
+                    <th
+                      scope="col"
+                      className="py-3 pr-4 font-semibold"
+                    >
+                      Overall score
+                    </th>
 
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusClasses(
-                            assessment.status,
-                          )}`}
-                        >
-                          {getStatusLabel(
-                            assessment.status,
+                    <th
+                      scope="col"
+                      className="py-3 pr-4 font-semibold"
+                    >
+                      Maturity
+                    </th>
+
+                    <th
+                      scope="col"
+                      className="py-3 font-semibold"
+                    >
+                      <span className="sr-only">
+                        Actions
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {sortAssessmentsForTable(
+                    assessments,
+                  ).map((assessment) => {
+                    const isCompleted =
+                      assessment.status ===
+                      "completed";
+
+                    return (
+                      <tr
+                        key={assessment.id}
+                        className="text-slate-700"
+                      >
+                        <td className="py-4 pr-4">
+                          {isCompleted ? (
+                            formatShortDate(
+                              assessment.completed_at,
+                            )
+                          ) : (
+                            <>
+                              <span className="block">
+                                {assessment.status ===
+                                "draft"
+                                  ? "Draft"
+                                  : "In progress"}
+                              </span>
+
+                              <span className="block text-sm text-slate-500">
+                                {assessment.status ===
+                                "draft"
+                                  ? "Created"
+                                  : "Opened"}{" "}
+                                {formatShortDate(
+                                  assessment.created_at,
+                                )}
+                              </span>
+                            </>
                           )}
-                        </span>
-                      </div>
+                        </td>
 
-                      {details?.isLoading ? (
-                        <p className="mt-6 text-sm text-slate-500">
-                          Loading assessment
-                          details...
-                        </p>
-                      ) : details?.errorMessage ? (
-                        <div className="mt-6 rounded-lg bg-red-50 p-4 text-sm text-red-700">
-                          {
-                            details.errorMessage
-                          }
-                        </div>
-                      ) : (
-                        <>
-                          <div className="mt-6">
-                            <div className="flex items-center justify-between gap-4">
-                              <p className="text-sm font-semibold text-slate-700">
-                                Response
-                                completion
-                              </p>
+                        <td className="py-4 pr-4">
+                          {assessment.name}
+                        </td>
 
-                              <p className="text-sm font-bold text-slate-900">
-                                {
-                                  progressPercentage
-                                }
-                                %
-                              </p>
-                            </div>
+                        <td className="py-4 pr-4">
+                          {isCompleted ? (
+                            <span className="font-bold text-slate-900">
+                              {Number(
+                                assessment.overall_combined_mean,
+                              ).toFixed(2)}
+                            </span>
+                          ) : (
+                            "Locked"
+                          )}
+                        </td>
 
-                            <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-200">
-                              <div
-                                className="h-full bg-cyan-700 transition-all"
-                                style={{
-                                  width: `${progressPercentage}%`,
-                                }}
-                              />
-                            </div>
+                        <td className="py-4 pr-4">
+                          {isCompleted &&
+                          assessment.overall_maturity_label ? (
+                            <span
+                              className={`inline-block rounded-md px-2.5 py-1 text-sm font-semibold ${getMaturityBadgeClasses(
+                                assessment.overall_maturity_label,
+                              )}`}
+                            >
+                              {
+                                assessment.overall_maturity_label
+                              }
+                            </span>
+                          ) : (
+                            <span className="text-slate-600">
+                              Available when
+                              completed
+                            </span>
+                          )}
+                        </td>
 
-                            <p className="mt-2 text-xs text-slate-500">
-                              {progress
-                                ?.fully_complete_count ??
-                                0}{" "}
-                              of{" "}
-                              {progress
-                                ?.active_question_count ??
-                                0}{" "}
-                              active questions
-                              complete for both
-                              groups
-                            </p>
-                          </div>
-
-                          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                            <div className="rounded-lg bg-slate-50 p-4">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Employee
-                                submitted
-                              </p>
-
-                              <p className="mt-2 text-2xl font-bold text-slate-900">
-                                {summary
-                                  ?.employee_submitted ??
-                                  0}
-                              </p>
-                            </div>
-
-                            <div className="rounded-lg bg-slate-50 p-4">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Manager
-                                submitted
-                              </p>
-
-                              <p className="mt-2 text-2xl font-bold text-slate-900">
-                                {summary
-                                  ?.senior_manager_submitted ??
-                                  0}
-                              </p>
-                            </div>
-
-                            <div className="rounded-lg bg-slate-50 p-4">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                In progress
-                              </p>
-
-                              <p className="mt-2 text-2xl font-bold text-amber-700">
-                                {summary
-                                  ?.in_progress_total ??
-                                  0}
-                              </p>
-                            </div>
-
-                            <div className="rounded-lg bg-slate-50 p-4">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Overall result
-                              </p>
-
-                              <p className="mt-2 text-lg font-bold text-slate-900">
-                                {assessment
-                                  .overall_maturity_label ??
-                                  "Not calculated"}
-                              </p>
-
-                              {assessment.overall_combined_mean && (
-                                <p className="mt-1 text-xs text-slate-500">
-                                  Mean:{" "}
-                                  {
-                                    assessment.overall_combined_mean
-                                  }
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </>
-                      )}
-
-                      <div className="mt-6 flex flex-wrap gap-3">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(
-                              `/assessments/${assessment.id}`,
-                            )
-                          }
-                          disabled={isDeleting}
-                          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                        >
-                          Setup and survey
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(
-                              `/assessments/${assessment.id}/responses`,
-                            )
-                          }
-                          disabled={isDeleting}
-                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
-                        >
-                          View responses
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(
-                              `/assessments/${assessment.id}/results`,
-                            )
-                          }
-                          disabled={isDeleting}
-                          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
-                        >
-                          View results
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleDeleteAssessment(
-                              assessment,
-                            )
-                          }
-                          disabled={isDeleting}
-                          className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                        >
-                          {isDeleting
-                            ? "Deleting..."
-                            : "Delete assessment"}
-                        </button>
-                      </div>
-                    </article>
-                  );
-                },
-              )}
+                        <td className="py-4">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              navigate(
+                                `/assessments/${assessment.id}/results`,
+                              )
+                            }
+                            className="font-semibold text-cyan-700 underline hover:text-cyan-900"
+                          >
+                            {isCompleted
+                              ? "Open"
+                              : "View progress"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </section>

@@ -91,3 +91,13 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class EmailVerificationResponse(BaseModel):
+    message: str
+    is_verified: bool
+
+
+class ResendVerificationResponse(BaseModel):
+    message: str
+    verification_token: str

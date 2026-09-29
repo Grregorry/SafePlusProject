@@ -29,6 +29,9 @@ from app.models.question_score import (
 from app.schemas.ai_analysis import (
     GeneratedAIAnalysis,
 )
+from app.services.priority_actions import (
+    select_priority_action_candidates,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -193,6 +196,11 @@ def build_assessment_data(
         ),
         "domains": domains,
         "questions": questions,
+        "priority_action_candidates": (
+            select_priority_action_candidates(
+                questions
+            )
+        ),
     }
 
 
@@ -314,20 +322,36 @@ Required analysis behaviour:
    or non-compliant.
 10. Do not claim that this analysis replaces a qualified
     SafePlus assessor.
-11. Every domain summary, priority action, and roadmap item
-    must include valid source IDs from the supplied official
-    source list.
-12. Every priority action must explain the relevant
-    assessment evidence.
-13. Order priority actions from most urgent to least urgent.
-14. Use practical roadmap timeframes such as:
+11. Every domain summary and roadmap item must include valid
+    source IDs from the supplied official source list.
+12. Use practical roadmap timeframes such as:
     - Immediate or 0 to 30 days
     - Short term or 1 to 3 months
     - Medium term or 3 to 6 months
     - Longer term or 6 to 12 months
-15. Include the supplied AI limitations in the limitations
+13. Include the supplied AI limitations in the limitations
     section, using clear wording.
-16. Return all required fields in the structured response.
+14. Return all required fields in the structured response.
+
+Priority actions — selection is already decided for you:
+
+The list under "priority_action_candidates" below has already
+been selected and ranked by the rule engine (highest to lowest
+leverage: High tier questions first, then Medium, then Low,
+ranked within each tier by Combined mean ascending and Opinion
+Gap descending). This ranking and the "urgency" tier are fixed
+inputs, not something you calculate.
+
+Do not add, remove, re-rank, or re-tier these candidates. For
+"priority_actions" in your response, return exactly one
+narrative object per candidate in "priority_action_candidates",
+matched by its "question_id", each containing only: "reason"
+(why this matters, referencing the supplied evidence),
+"recommended_action" (a practical, specific action), "source_ids"
+(valid IDs from the approved source list), and
+"source_relevance" (why those sources apply). If
+"priority_action_candidates" is empty, return an empty
+"priority_actions" list.
 
 Assessment data:
 
@@ -393,10 +417,50 @@ def validate_source_ids(
         )
 
 
+def validate_priority_action_question_ids(
+    generated: GeneratedAIAnalysis,
+    candidates: list[dict[str, object]],
+) -> None:
+    expected_question_ids = {
+        candidate["question_id"]
+        for candidate in candidates
+    }
+
+    returned_question_ids = [
+        priority_action.question_id
+        for priority_action
+        in generated.priority_actions
+    ]
+
+    if len(returned_question_ids) != len(
+        set(returned_question_ids)
+    ):
+        raise GeminiAnalysisError(
+            (
+                "Gemini returned duplicate "
+                "priority action question IDs."
+            )
+        )
+
+    if set(returned_question_ids) != (
+        expected_question_ids
+    ):
+        raise GeminiAnalysisError(
+            (
+                "Gemini's priority actions did "
+                "not match the rule-engine's "
+                "selected candidates."
+            )
+        )
+
+
 def generate_gemini_analysis(
     assessment: Assessment,
     database: Session,
-) -> GeneratedAIAnalysis:
+) -> tuple[
+    GeneratedAIAnalysis,
+    list[dict[str, object]],
+]:
     if not settings.gemini_api_key:
         raise GeminiAnalysisError(
             (
@@ -458,6 +522,18 @@ def generate_gemini_analysis(
             )
         )
 
+    priority_action_candidates = (
+        assessment_data.get(
+            "priority_action_candidates",
+        )
+    )
+
+    if not isinstance(
+        priority_action_candidates,
+        list,
+    ):
+        priority_action_candidates = []
+
     client = genai.Client(
         api_key=settings.gemini_api_key,
     )
@@ -489,6 +565,28 @@ def generate_gemini_analysis(
         logger.exception(
             "Gemini analysis request failed"
         )
+
+        # Google reports overload (503) and rate or quota limits (429)
+        # with a status code; say so plainly instead of the generic hint.
+        status_code = getattr(error, "code", None)
+
+        if status_code == 503:
+            raise GeminiAnalysisError(
+                (
+                    "Gemini is busy right now because "
+                    "of high demand. Please wait a few "
+                    "minutes and try again."
+                )
+            ) from error
+
+        if status_code == 429:
+            raise GeminiAnalysisError(
+                (
+                    "Gemini's usage limit has been "
+                    "reached. Wait a minute and try "
+                    "again, or check the API quota."
+                )
+            ) from error
 
         raise GeminiAnalysisError(
             (
@@ -533,4 +631,9 @@ def generate_gemini_analysis(
 
     validate_source_ids(generated)
 
-    return generated
+    validate_priority_action_question_ids(
+        generated,
+        priority_action_candidates,
+    )
+
+    return generated, priority_action_candidates

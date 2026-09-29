@@ -10,17 +10,16 @@ from sqlalchemy import select
 from app.api.dependencies import (
     CurrentOrganisation,
     DatabaseSession,
+    get_owned_assessment,
 )
 from app.core.config import settings
 from app.data.safeplus_guidance import (
     SAFEPLUS_GUIDANCE_SOURCES,
 )
-from app.models import (
-    AIAnalysis,
-    Assessment,
-)
+from app.models import AIAnalysis
 from app.schemas.ai_analysis import (
     AIAnalysisGenerationResponse,
+    AIAnalysisInclusionRequest,
     AIAnalysisResponse,
 )
 from app.services.gemini_analysis import (
@@ -33,28 +32,6 @@ router = APIRouter(
     prefix="/api/assessments",
     tags=["ai-analysis"],
 )
-
-
-def get_owned_assessment(
-    assessment_id: int,
-    organisation_id: int,
-    database: DatabaseSession,
-) -> Assessment:
-    assessment = database.scalar(
-        select(Assessment).where(
-            Assessment.id == assessment_id,
-            Assessment.organisation_id
-            == organisation_id,
-        )
-    )
-
-    if assessment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Assessment not found.",
-        )
-
-    return assessment
 
 
 def build_analysis_response(
@@ -76,6 +53,9 @@ def build_analysis_response(
         ai_provider=analysis.ai_provider,
         generated_at=analysis.generated_at,
         status=analysis.status,
+        included_in_report=(
+            analysis.included_in_report
+        ),
     )
 
 
@@ -134,6 +114,62 @@ def get_ai_analysis_sources(
     }
 
 
+@router.put(
+    "/{assessment_id}/ai-analysis/inclusion",
+    response_model=AIAnalysisResponse,
+)
+def update_ai_analysis_inclusion(
+    assessment_id: int,
+    payload: AIAnalysisInclusionRequest,
+    organisation: CurrentOrganisation,
+    database: DatabaseSession,
+) -> AIAnalysisResponse:
+    get_owned_assessment(
+        assessment_id,
+        organisation.id,
+        database,
+    )
+
+    analysis = database.scalar(
+        select(AIAnalysis).where(
+            AIAnalysis.assessment_id
+            == assessment_id,
+        )
+    )
+
+    if analysis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "AI analysis has not been generated "
+                "for this assessment."
+            ),
+        )
+
+    if (
+        payload.included_in_report
+        and analysis.status != "completed"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Only a completed AI analysis can be "
+                "included in the report."
+            ),
+        )
+
+    analysis.included_in_report = (
+        payload.included_in_report
+    )
+
+    database.commit()
+    database.refresh(analysis)
+
+    return build_analysis_response(
+        analysis
+    )
+
+
 @router.post(
     "/{assessment_id}/ai-analysis/generate",
     response_model=AIAnalysisGenerationResponse,
@@ -181,14 +217,18 @@ def generate_ai_analysis(
     else:
         analysis.status = "pending"
         analysis.ai_provider = provider_name
+        # New wording has not been checked by anyone yet.
+        analysis.included_in_report = False
 
     database.commit()
     database.refresh(analysis)
 
     try:
-        generated = generate_gemini_analysis(
-            assessment,
-            database,
+        generated, priority_action_candidates = (
+            generate_gemini_analysis(
+                assessment,
+                database,
+            )
         )
 
         analysis.overall_summary = (
@@ -218,12 +258,24 @@ def generate_ai_analysis(
             ),
         }
 
-        analysis.priority_actions = [
-            item.model_dump(
-                mode="json"
-            )
+        narratives_by_question_id = {
+            item.question_id: item
             for item
             in generated.priority_actions
+        }
+
+        analysis.priority_actions = [
+            {
+                **candidate,
+                **narratives_by_question_id[
+                    candidate["question_id"]
+                ].model_dump(
+                    mode="json",
+                    exclude={"question_id"},
+                ),
+            }
+            for candidate
+            in priority_action_candidates
         ]
 
         analysis.roadmap = [

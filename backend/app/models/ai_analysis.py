@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -69,6 +69,15 @@ class AIAnalysis(Base):
         nullable=False,
         default="pending",
         server_default=text("'pending'"),
+    )
+
+    # AI text never reaches a report by default; a person has to
+    # include it after reading it. Regenerating resets this.
+    included_in_report: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
     )
 
     assessment: Mapped["Assessment"] = relationship(

@@ -1,3 +1,6 @@
+import { API_BASE_URL } from "./config";
+import { getErrorMessage } from "./errors";
+
 export type OrganisationCategory =
   | "Construction"
   | "Mining and quarrying"
@@ -36,31 +39,6 @@ export type TokenResponse = {
   token_type: string;
   expires_in: number;
 };
-
-type ApiErrorResponse = {
-  detail?: string;
-};
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ??
-  "http://127.0.0.1:8000";
-
-async function getErrorMessage(
-  response: Response,
-): Promise<string> {
-  try {
-    const error =
-      (await response.json()) as ApiErrorResponse;
-
-    if (typeof error.detail === "string") {
-      return error.detail;
-    }
-  } catch {
-    // The response did not contain JSON.
-  }
-
-  return `Request failed with status ${response.status}.`;
-}
 
 export async function registerOrganisation(
   registration: RegisterRequest,
@@ -133,4 +111,54 @@ export async function getCurrentOrganisation(
   }
 
   return response.json() as Promise<Organisation>;
+}
+
+export type EmailVerificationResponse = {
+  message: string;
+  is_verified: boolean;
+};
+
+export type ResendVerificationResponse = {
+  message: string;
+  verification_token: string;
+};
+
+export async function verifyEmail(
+  token: string,
+): Promise<EmailVerificationResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/verify?token=${encodeURIComponent(
+      token,
+    )}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  return response.json() as Promise<EmailVerificationResponse>;
+}
+
+export async function resendVerification(
+  accessToken: string,
+): Promise<ResendVerificationResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/resend-verification`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response),
+    );
+  }
+
+  return response.json() as Promise<ResendVerificationResponse>;
 }

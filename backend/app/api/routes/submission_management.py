@@ -7,9 +7,9 @@ from sqlalchemy import func, select
 from app.api.dependencies import (
     CurrentOrganisation,
     DatabaseSession,
+    get_owned_assessment,
 )
 from app.models import (
-    Assessment,
     AssessmentQuestion,
     IndividualResponse,
     SurveySubmission,
@@ -42,27 +42,6 @@ class DeleteSubmissionResponse(BaseModel):
     message: str
 
 
-def get_owned_assessment(
-    assessment_id: int,
-    organisation: CurrentOrganisation,
-    database: DatabaseSession,
-) -> Assessment:
-    assessment = database.scalar(
-        select(Assessment).where(
-            Assessment.id == assessment_id,
-            Assessment.organisation_id == organisation.id,
-        )
-    )
-
-    if assessment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Assessment not found.",
-        )
-
-    return assessment
-
-
 @router.get(
     "/api/assessments/{assessment_id}/submissions",
     response_model=SubmissionListResponse,
@@ -74,7 +53,7 @@ def list_assessment_submissions(
 ) -> SubmissionListResponse:
     get_owned_assessment(
         assessment_id,
-        organisation,
+        organisation.id,
         database,
     )
 
@@ -159,7 +138,7 @@ def delete_unfinished_submission(
 ) -> DeleteSubmissionResponse:
     get_owned_assessment(
         assessment_id,
-        organisation,
+        organisation.id,
         database,
     )
 

@@ -1,8 +1,13 @@
+import { API_BASE_URL } from "./config";
+import { getErrorMessage } from "./errors";
+
 export type QuestionProgress = {
   question_id: number;
   question_number: string;
   employee_complete: boolean;
   manager_complete: boolean;
+  employee_manual_entries_recorded: number;
+  manager_manual_entries_recorded: number;
   fully_complete: boolean;
 };
 
@@ -13,33 +18,14 @@ export type AssessmentProgress = {
   manager_complete_count: number;
   fully_complete_count: number;
   overall_progress_percentage: number;
+  expected_manual_entries_employee: number;
+  expected_manual_entries_manager: number;
+  digital_employee_complete_count: number;
+  digital_manager_complete_count: number;
+  manual_employee_complete_count: number;
+  manual_manager_complete_count: number;
   questions: QuestionProgress[];
 };
-
-type ApiErrorResponse = {
-  detail?: string;
-};
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ??
-  "http://127.0.0.1:8000";
-
-async function getErrorMessage(
-  response: Response,
-): Promise<string> {
-  try {
-    const error =
-      (await response.json()) as ApiErrorResponse;
-
-    if (typeof error.detail === "string") {
-      return error.detail;
-    }
-  } catch {
-    // The response did not contain valid JSON.
-  }
-
-  return `Request failed with status ${response.status}.`;
-}
 
 export async function getAssessmentProgress(
   assessmentId: number,

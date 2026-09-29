@@ -12,6 +12,9 @@ from app.api.routes.ai_analysis import (
 from app.api.routes.assessment_progress import (
     router as assessment_progress_router,
 )
+from app.api.routes.assessment_reports import (
+    router as assessment_reports_router,
+)
 from app.api.routes.assessments import (
     router as assessments_router,
 )
@@ -48,6 +51,9 @@ app.include_router(auth_router)
 app.include_router(questions_router)
 app.include_router(assessments_router)
 app.include_router(
+    assessment_reports_router
+)
+app.include_router(
     assessment_progress_router
 )
 app.include_router(public_surveys_router)
@@ -65,6 +71,8 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
+    # Local dev servers may run on another port when 5173 is taken.
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -44,21 +44,19 @@ class GeneratedDomainSummary(BaseModel):
     )
 
 
-class GeneratedPriorityAction(BaseModel):
-    priority: int = Field(
-        ge=1,
-        le=10,
-    )
+class GeneratedPriorityActionNarrative(BaseModel):
+    """AI narrative for a single rule-selected priority action.
 
-    title: str = Field(
-        min_length=1,
-        max_length=200,
-    )
+    Selection, ranking, and urgency are decided entirely by the
+    rule engine (see app/services/priority_actions.py) per FR14/
+    FR15 and the Scoring and Maturity Framework V1 (section 6.4:
+    "The tier is a deterministic input to the AI, not an AI
+    output"). The AI supplies only the narrative fields below for
+    each question_id it is given — it must not invent, drop, or
+    reorder candidates.
+    """
 
-    assessment_evidence: list[str] = Field(
-        min_length=1,
-        max_length=6,
-    )
+    question_id: int
 
     reason: str = Field(
         min_length=1,
@@ -68,16 +66,6 @@ class GeneratedPriorityAction(BaseModel):
     recommended_action: str = Field(
         min_length=1,
         max_length=1200,
-    )
-
-    related_domain: str = Field(
-        min_length=1,
-        max_length=100,
-    )
-
-    urgency: str = Field(
-        min_length=1,
-        max_length=30,
     )
 
     source_ids: list[str] = Field(
@@ -142,10 +130,10 @@ class GeneratedAIAnalysis(BaseModel):
     )
 
     priority_actions: list[
-        GeneratedPriorityAction
+        GeneratedPriorityActionNarrative
     ] = Field(
-        min_length=1,
-        max_length=6,
+        default_factory=list,
+        max_length=5,
     )
 
     roadmap: list[
@@ -181,10 +169,15 @@ class AIAnalysisResponse(BaseModel):
     ai_provider: str
     generated_at: datetime | None
     status: str
+    included_in_report: bool
 
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
+class AIAnalysisInclusionRequest(BaseModel):
+    included_in_report: bool
 
 
 class AIAnalysisGenerationResponse(

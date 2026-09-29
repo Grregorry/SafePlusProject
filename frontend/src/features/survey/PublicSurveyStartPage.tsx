@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import {
@@ -40,6 +41,33 @@ function PublicSurveyStartPage() {
     errorMessage,
     setErrorMessage,
   ] = useState("");
+
+  const estimatedMinutes = useMemo(
+    () => {
+      if (
+        !survey ||
+        survey.active_question_count === 0
+      ) {
+        return null;
+      }
+
+      const count =
+        survey.active_question_count;
+
+      const low = Math.max(
+        1,
+        Math.round((count * 10) / 60),
+      );
+
+      const high = Math.max(
+        low + 1,
+        Math.round((count * 15) / 60),
+      );
+
+      return { low, high };
+    },
+    [survey],
+  );
 
   useEffect(() => {
     async function loadSurvey() {
@@ -146,9 +174,54 @@ function PublicSurveyStartPage() {
           </h1>
 
           <p className="mt-3 text-slate-600">
-            This assessment contains{" "}
-            {survey.active_question_count}{" "}
-            questions. Choose the respondent
+            {survey.organisation_name} is using
+            the SafePlus framework to understand
+            how health and safety is actually
+            experienced day to day — not just
+            what company policy says on paper.
+            Your answers help identify what's
+            working well and where support is
+            needed most.
+          </p>
+
+          <div className="mt-6 rounded-xl bg-slate-50 p-6">
+            <p className="text-sm font-semibold text-slate-700">
+              What to expect
+            </p>
+
+            <ul className="mt-3 space-y-2 text-sm text-slate-600">
+              <li>
+                •{" "}
+                {survey.active_question_count}{" "}
+                questions across three
+                categories: Leadership, Worker
+                Engagement, and Risk Management.
+              </li>
+
+              {estimatedMinutes && (
+                <li>
+                  • Takes about{" "}
+                  {estimatedMinutes.low}–
+                  {estimatedMinutes.high} minutes
+                  to complete.
+                </li>
+              )}
+
+              <li>
+                • Your responses are anonymous —
+                we don't collect your name or
+                email, and individual answers
+                can't be traced back to you. Only
+                combined, organisation-level
+                results are shared.
+              </li>
+            </ul>
+          </div>
+
+          <p className="mt-6 text-slate-600">
+            Please answer as honestly as
+            possible, based on your own
+            experience. Choose the respondent
             group that applies to you before
             beginning.
           </p>
