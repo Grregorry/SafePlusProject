@@ -1,0 +1,30 @@
+# Normalise text line endings in the repository; check out native per OS.
+* text=auto
+
+# Windows batch files must keep CRLF - cmd.exe can misparse LF-only files.
+*.bat text eol=crlf
+
+# Shell scripts must keep LF even when checked out on Windows.
+*.sh text eol=lf
+
+# Explicit text types
+*.py    text
+*.ts    text
+*.tsx   text
+*.css   text
+*.html  text
+*.json  text
+*.md    text
+*.ini   text
+*.svg   text
+*.mako  text
+
+# Binary - never convert
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
