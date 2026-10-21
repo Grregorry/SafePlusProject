@@ -12,8 +12,7 @@ WorkSafe New Zealand's SafePlus guidance.
 
 ## Licensing and intellectual property
 
-**TO BE CONFIRMED — do not distribute or make this repository public until
-resolved.**
+Licensing is still to be confirmed. This repository is public from 21 October 2026 so the AUT markers can access it, and will return to private once the project has been marked. Do not copy, reuse or distribute the code until licensing is resolved.
 
 Three parties may hold rights in this work: Auckland University of Technology,
 First Step Solutions (client), and WorkSafe New Zealand. The assessment
